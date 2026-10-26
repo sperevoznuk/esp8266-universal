@@ -123,7 +123,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     <option value="13">D7 (GPIO13)</option>
                 </select></div>
                 <div class="col"><input type="text" id="newName" placeholder="Имя (до 25 симв.)" maxlength="25"></div>
-                <button onclick="addChannel()" style="width: 120px; margin-bottom: 10px;">Добавить</button>
+                <button id="addChannelBtn" onclick="addChannel()" style="width: 120px; margin-bottom: 10px;">Добавить</button>
             </div>
         </div>
         <div id="tabRules" class="tab-content">
@@ -157,7 +157,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                         <div id="actuatorsList" style="display:block; margin-top:5px;"></div>
                     </div>
                 </div>
-                <button onclick="addRule()">Добавить правило</button>
+                <button id="addRuleBtn" onclick="addRule()">Добавить правило</button>
             </div>
         </div>
         <div id="tabWifi" class="tab-content">
@@ -226,6 +226,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         let channels = [];
         let rules = [];
         let availableSensors = [];
+        let editChannelIndex = -1;
+        let editRuleIndex = -1;
         let wifiSsid = '';
         let wifiPass = '';
 
@@ -298,7 +300,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                         <div class="ch-name-line">${ch.name || '—'}</div>
                         <div class="ch-type-line">${typeLabel} &middot; ${pinNames[ch.pin] || ch.pin}</div>
                     </td>
-                    <td><button class="del" onclick="removeChannel(${i})">Удалить</button></td>
+                    <td><button class="toggle" onclick="editChannel(${i})">Изменить</button> <button class="del" onclick="removeChannel(${i})">Удалить</button></td>
                 </tr>`;
             });
 
@@ -322,7 +324,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                         <div class="rcond">${condStr}</div>
                         <div class="r-togglers"><div class="rule-toggle ${r.enabled ? 'on' : ''}" onclick="toggleRule(${i})"></div> <span style="font-size:12px;color:#888;vertical-align:middle;">Работает</span> &middot; → ${acts}</div>
                     </td>
-                    <td><button class="del" onclick="removeRule(${i})">Удалить</button></td>
+                    <td><button class="toggle" onclick="editRule(${i})">Изменить</button> <button class="del" onclick="removeRule(${i})">Удалить</button></td>
                 </tr>`;
             });
 
@@ -356,10 +358,30 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             });
         }
 
+        function editChannel(i) {
+            editChannelIndex = i;
+            const ch = channels[i];
+            document.getElementById('newType').value = ch.type;
+            document.getElementById('newPin').value = ch.pin;
+            document.getElementById('newName').value = ch.name || '';
+            document.getElementById('addChannelBtn').textContent = 'Обновить';
+        }
+
         function addChannel() {
             const type = document.getElementById('newType').value;
             const pin = parseInt(document.getElementById('newPin').value);
             const name = document.getElementById('newName').value.trim();
+            
+            if (editChannelIndex >= 0) {
+                // Режим редактирования
+                channels[editChannelIndex].type = type;
+                channels[editChannelIndex].pin = pin;
+                channels[editChannelIndex].name = name;
+                editChannelIndex = -1;
+                document.getElementById('addChannelBtn').textContent = 'Добавить';
+                renderTables();
+                return;
+            }
             
             if (channels.some(c => c.pin === pin)) { alert("Пин занят!"); return; }
             channels.push({ type, pin, name });
@@ -374,6 +396,33 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         }
         
         function removeRule(i) { rules.splice(i, 1); renderTables(); }
+
+        function editRule(i) {
+            editRuleIndex = i;
+            const r = rules[i];
+            document.getElementById('ruleName').value = r.name || '';
+            document.getElementById('ruleCondType').value = r.cond.type;
+            // Обновить список источников
+            updateRuleSource();
+            // В sensorParams уже подставлены source и числа, ждём микротаск
+            setTimeout(() => {
+                // Выбрать source
+                const srcSelect = document.getElementById('ruleSource');
+                const srcVal = r.cond.type === 'sensor' ? r.cond.rom : String(r.cond.pin);
+                for (let opt of srcSelect.options) {
+                    if (opt.value === srcVal) { opt.selected = true; break; }
+                }
+                if (r.cond.type === 'sensor') {
+                    document.getElementById('ruleTarget').value = r.cond.target;
+                    document.getElementById('ruleHyst').value = r.cond.hysteresis || 0.5;
+                }
+                // Отметить актуаторы
+                document.querySelectorAll('#actuatorsList input').forEach(cb => {
+                    cb.checked = r.actuators.includes(parseInt(cb.value));
+                });
+            }, 0);
+            document.getElementById('addRuleBtn').textContent = 'Обновить правило';
+        }
 
         function addRule() {
             const name = document.getElementById('ruleName').value.trim();
@@ -395,6 +444,17 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 cond.hysteresis = parseFloat(document.getElementById('ruleHyst').value) || 0.5;
             } else {
                 cond.pin = parseInt(source);
+            }
+            
+            if (editRuleIndex >= 0) {
+                // Режим редактирования
+                rules[editRuleIndex].name = name;
+                rules[editRuleIndex].cond = cond;
+                rules[editRuleIndex].actuators = acts;
+                editRuleIndex = -1;
+                document.getElementById('addRuleBtn').textContent = 'Добавить правило';
+                renderTables();
+                return;
             }
             
             // Генерация простого ID
