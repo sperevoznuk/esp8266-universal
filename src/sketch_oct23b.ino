@@ -172,18 +172,34 @@ void handleSaveConfig() {
 
     storage::save();
     
-    // Применяем Wi-Fi настройки, если указаны
+    // Применяем Wi-Fi настройки только если они изменились
     String ssid = doc["ssid"] | "";
     String pass = doc["pass"] | "";
+    bool wifiChanged = false;
+    
     if (ssid.length() > 0) {
-        logf("Сохранение Wi-Fi настроек: SSID=%s", ssid.c_str());
-        WiFi.persistent(true);
-        WiFi.begin(ssid.c_str(), pass.c_str());
+        struct station_config staConf;
+        wifi_station_get_config(&staConf);
+        String currSsid = String((char*)staConf.ssid);
+        String currPass = String((char*)staConf.password);
+        
+        // Кредалы изменились — применяем
+        if (ssid != currSsid || (pass.length() > 0 && pass != currPass)) {
+            wifiChanged = true;
+            WiFi.persistent(true);
+            WiFi.begin(ssid.c_str(), pass.c_str());
+            logf("Wi-Fi изменён: SSID=%s", ssid.c_str());
+        } else {
+            // Тот же SSID и пустой пароль — не трогаем Wi-Fi
+            logf("Wi-Fi не изменён, перезагрузка не требуется");
+        }
     }
     
     server.send(200, "application/json", "{\"status\":\"ok\"}");
-    delay(1000);
-    ESP.restart();
+    if (wifiChanged) {
+        delay(1000);
+        ESP.restart();
+    }
 }
 
 void handleApiStatus() {
