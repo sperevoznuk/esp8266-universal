@@ -1,0 +1,24 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibs/
+.pioide/
+.package*
+__pycache__/
+*.o
+*.o.*
+*.d
+*.d.*
+
+# VS Code
+.vscode/settings.json
+.vscode/launch.json
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# System
+.DS_Store
+Thumbs.db
