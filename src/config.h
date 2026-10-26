@@ -33,7 +33,9 @@ struct Rule {
 };
 
 struct Config {
+    String deviceName;
     String serverUrl;
+    uint16_t period = 60; // период отправки телеметрии в секундах
     std::vector<Channel> channels; 
     std::vector<Rule> rules;
 };

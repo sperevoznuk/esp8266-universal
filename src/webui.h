@@ -56,17 +56,34 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         .active-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #ccc; }
         .active-dot.on { background: #28a745; box-shadow: 0 0 5px #28a745; }
         .form-box { background: #f9f9f9; padding: 15px; border-radius: 5px; border: 1px solid #ddd; margin-top: 15px; }
-        .tabs { display: flex; gap: 0; margin-bottom: 0; border-bottom: 2px solid #007bff; }
-        .tabs button { flex: 1; padding: 10px; background: #e9ecef; border: none; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 14px; color: #555; transition: 0.2s; margin-bottom: -2px; border-bottom: 2px solid transparent; }
-        .tabs button.active { background: white; color: #007bff; font-weight: bold; border-bottom: 2px solid #007bff; }
+        .tabs { display: flex; gap: 0; margin-bottom: 0; overflow-x: auto; overflow-y: hidden; white-space: nowrap; flex-wrap: nowrap; }
+        .tabs button { flex: 0 0 auto; padding: 10px 12px; background: #e9ecef; border: none; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 13px; color: #555; transition: 0.2s; }
+        .tabs button.active { background: white; color: #007bff; font-weight: normal; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
+        .tab-desc { font-size: 12px; color: #666; margin: 5px 0 15px 0; line-height: 1.4; }
+        .table-wrap { overflow-x: auto; }
+        .table-wrap table { min-width: 500px; }
+        #channelsTable { min-width: 300px; }
         textarea#examplePayload { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: monospace; font-size: 12px; resize: vertical; }
+        .rule-cond-cell { min-width: 230px; }
+        .rule-cond-cell .rname { font-weight: bold; font-size: 14px; margin-bottom: 3px; }
+        .rule-cond-cell .rcond { font-size: 12px; color: #555; margin-bottom: 2px; }
+        .rule-cond-cell .racts { font-size: 12px; color: #888; }
+        .r-togglers { font-size: 12px; color: #888; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+        .ch-name-line { font-weight: bold; font-size: 14px; margin-bottom: 3px; }
+        .ch-type-line { font-size: 12px; color: #555; }
+        #actuatorsList label { display: block; padding: 4px 0; }
+        @media (max-width: 600px) {
+            .row { flex-direction: column; gap: 5px; }
+            .row .col { width: 100%; }
+            .row button { width: 100% !important; margin-bottom: 5px !important; }
+        }
     </style>
 </head>
 <body>
     <div class="card">
-        <h2>Текущее состояние</h2>
+        <h2>Текущее состояние <span id="deviceNameDisplay" style="font-size:14px;color:#888;"></span></h2>
         <div class="status-group">
             <div><h3>Реле</h3><div id="relayStatus"></div></div>
             <div><h3>Кнопки</h3><div id="buttonStatus"></div></div>
@@ -79,13 +96,17 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             <button class="active" onclick="switchTab(this, 'channels')">Каналы</button>
             <button onclick="switchTab(this, 'rules')">Правила</button>
             <button onclick="switchTab(this, 'wifi')">Wi-Fi</button>
-            <button onclick="switchTab(this, 'http')">HTTP</button>
+            <button onclick="switchTab(this, 'telemetry')">Телеметрия</button>
+            <button onclick="switchTab(this, 'config')">Конфиг</button>
         </div>
         <div id="tabChannels" class="tab-content active">
+            <div class="tab-desc">Управление пинами: добавьте реле для управления, кнопки для ввода и датчики DS18B20 для измерения температуры.</div>
+            <div class="table-wrap">
             <table id="channelsTable">
-                <thead><tr><th>Тип</th><th>Пин</th><th>Имя</th><th>Действие</th></tr></thead>
+                <thead><tr><th>Канал</th><th style="width:110px">Действие</th></tr></thead>
                 <tbody></tbody>
             </table>
+            </div>
             <div class="row" style="margin-top: 15px;">
                 <div class="col"><select id="newType">
                     <option value="relay">Реле</option>
@@ -106,10 +127,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             </div>
         </div>
         <div id="tabRules" class="tab-content">
+            <div class="tab-desc">Правила автоматизации: условие (температура датчика, состояние кнопки или реле) &rarr; действие (включить реле).</div>
+            <div class="table-wrap">
             <table id="rulesTable">
-                <thead><tr><th>Имя</th><th>Условие</th><th>Действие</th><th>Работает</th><th>Сработало</th><th>Действие</th></tr></thead>
+                <thead><tr><th style="width:30px"></th><th style="min-width:230px">Условие</th><th>Действие</th></tr></thead>
                 <tbody></tbody>
             </table>
+            </div>
             <div class="form-box">
                 <h3>Добавить правило</h3>
                 <div class="row">
@@ -130,15 +154,19 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 <div class="row">
                     <div class="col">
                         <label>Включать реле (Actuators):</label>
-                        <div id="actuatorsList" style="display:flex; flex-wrap:wrap; gap:10px; margin-top:5px;"></div>
+                        <div id="actuatorsList" style="display:block; margin-top:5px;"></div>
                     </div>
                 </div>
                 <button onclick="addRule()">Добавить правило</button>
             </div>
         </div>
         <div id="tabWifi" class="tab-content">
+            <div class="tab-desc">Настройка подключения к беспроводной сети. После сохранения устройство перезагрузится с новыми параметрами.</div>
             <div class="form-box">
                 <h3>Настройка беспроводной сети</h3>
+                <div class="row">
+                    <div class="col"><label>Название устройства</label><input type="text" id="deviceName" maxlength="32" placeholder="ESP8266-Universal"></div>
+                </div>
                 <div class="row">
                     <div class="col"><label>Имя сети (SSID)</label><input type="text" id="wifiSsid" maxlength="32" placeholder="Имя сети Wi-Fi"></div>
                 </div>
@@ -147,11 +175,20 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 </div>
             </div>
         </div>
-        <div id="tabHttp" class="tab-content">
+        <div id="tabTelemetry" class="tab-content">
+            <div class="tab-desc">Настройка отправки телеметрии на внешний сервер. Данные содержат показания датчиков, состояние реле/кнопок и статус правил.</div>
             <div class="form-box">
-                <h3>HTTP интеграция</h3>
+                <h3>Телеметрия</h3>
                 <div class="row">
                     <div class="col"><label>Адрес сервера</label><input type="text" id="serverUrl" placeholder="http://192.168.1.100:8080/api"></div>
+                </div>
+                <div class="row">
+                    <div class="col"><label>Период отправки</label><select id="periodSelect">
+                        <option value="15">15 сек</option>
+                        <option value="30">30 сек</option>
+                        <option value="60" selected>1 мин</option>
+                        <option value="300">5 мин</option>
+                    </select></div>
                 </div>
                 <div class="row">
                     <div class="col">
@@ -159,6 +196,26 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                         <textarea id="examplePayload" rows="8" readonly></textarea>
                     </div>
                 </div>
+            </div>
+        </div>
+        <div id="tabConfig" class="tab-content">
+            <div class="tab-desc">Сохранение и восстановление полной конфигурации устройства: каналы, правила, настройки сети и телеметрии.</div>
+            <div class="form-box">
+                <h3>Управление конфигурацией</h3>
+                <div class="row">
+                    <div class="col">
+                        <label>Скачать текущий конфиг</label>
+                        <button onclick="downloadConfig()" style="background:#007bff;">📥 Скачать config.json</button>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col">
+                        <label>Загрузить конфиг с компьютера</label>
+                        <input type="file" id="configFileInput" accept=".json">
+                        <button onclick="uploadConfig()" style="background:#ffc107;color:#000;">📤 Загрузить и применить</button>
+                    </div>
+                </div>
+                <p style="font-size:12px;color:#999;margin-top:10px;">Функционал загрузки конфига будет доработан после тестирования.</p>
             </div>
         </div>
         <button class="save" onclick="saveConfig()">Сохранить конфигурацию</button>
@@ -186,26 +243,39 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             const data = await res.json();
             channels = data.channels || [];
             rules = data.rules || [];
+            if (data.deviceName) { document.getElementById('deviceName').value = data.deviceName; document.getElementById('deviceNameDisplay').textContent = '— ' + data.deviceName; }
             if (data.serverUrl) document.getElementById('serverUrl').value = data.serverUrl;
+            if (data.period) document.getElementById('periodSelect').value = data.period;
             if (data.ssid) { wifiSsid = data.ssid; document.getElementById('wifiSsid').value = data.ssid; }
+            if (data.pass) { wifiPass = data.pass; document.getElementById('wifiPass').value = data.pass; }
             renderTables();
             updateExamplePayload();
         }
 
-        // Генерация примера отправляемых данных
+        // Генерация примера отправляемых данных (телеметрия)
         function updateExamplePayload() {
+            // sensorValues — все "датчики" (реле, кнопки, темп. датчики)
+            const sensorValues = [];
+            // Реле
+            channels.filter(c => c.type === 'relay').forEach(c => {
+                sensorValues.push({ name: c.name || pinNames[c.pin] || c.pin, value: false, type: 'relay' });
+            });
+            // Кнопки
+            channels.filter(c => c.type === 'button').forEach(c => {
+                sensorValues.push({ name: c.name || pinNames[c.pin] || c.pin, value: false, type: 'button' });
+            });
+            // Температурные датчики (каждый = отдельный элемент)
+            availableSensors.forEach(s => {
+                sensorValues.push({ name: s.rom, value: s.t, type: 'temperature' });
+            });
+
             const payload = {
-                device: "ESP8266",
-                channels: channels.map(c => ({
-                    type: c.type,
-                    pin: c.pin,
-                    name: c.name || ''
-                })),
+                sensors: sensorValues,
                 rules: rules.map(r => ({
+                    id: r.id,
                     name: r.name || '',
                     enabled: r.enabled,
-                    condition: r.cond.type === 'sensor' ? `${r.cond.rom} <= ${r.cond.target}°C` : `pin ${r.cond.pin}`,
-                    actuators: r.actuators
+                    triggered: r.active || false
                 }))
             };
             document.getElementById('examplePayload').value = JSON.stringify(payload, null, 2);
@@ -222,10 +292,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             const chBody = document.querySelector('#channelsTable tbody');
             chBody.innerHTML = '';
             channels.forEach((ch, i) => {
+                const typeLabel = {relay:'Реле', button:'Кнопка', sensor:'Датчик'}[ch.type] || ch.type;
                 chBody.innerHTML += `<tr>
-                    <td>${ch.type}</td>
-                    <td>${pinNames[ch.pin] || ch.pin}</td>
-                    <td><input type="text" value="${ch.name || ''}" maxlength="25" onchange="channels[${i}].name=this.value" style="width:100%;box-sizing:border-box;padding:2px;border:1px solid #ddd;border-radius:3px;"></td>
+                    <td>
+                        <div class="ch-name-line">${ch.name || '—'}</div>
+                        <div class="ch-type-line">${typeLabel} &middot; ${pinNames[ch.pin] || ch.pin}</div>
+                    </td>
                     <td><button class="del" onclick="removeChannel(${i})">Удалить</button></td>
                 </tr>`;
             });
@@ -236,23 +308,20 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             rules.forEach((r, i) => {
                 let condStr = '';
                 if (r.cond.type === 'sensor') {
-                    condStr = `Датчик ${r.cond.rom} <= ${r.cond.target}°C (h:${r.cond.hysteresis})`;
+                    condStr = `Датчик: ${r.cond.rom} &lt;= ${r.cond.target}°C (h:${Number(r.cond.hysteresis).toFixed(1)})`;
                 } else {
                     condStr = `${r.cond.type === 'relay' ? 'Реле' : 'Кнопка'} ${pinNames[r.cond.pin] || r.cond.pin}`;
                 }
                 const acts = r.actuators.map(p => pinNames[p] || p).join(', ');
-                
-                // Индикатор active (берем из последнего статуса)
                 const isActive = r.active || false;
                 
                 rBody.innerHTML += `<tr>
-                    <td><input type="text" value="${r.name || ''}" maxlength="25" onchange="rules[${i}].name=this.value" style="width:100%;box-sizing:border-box;padding:2px;border:1px solid #ddd;border-radius:3px;"></td>
-                    <td>${condStr}</td>
-                    <td>${acts}</td>
-                    <td>
-                        <div class="rule-toggle ${r.enabled ? 'on' : ''}" onclick="toggleRule(${i})"></div>
+                    <td style="text-align:center"><div class="active-dot ${isActive ? 'on' : ''}"></div></td>
+                    <td class="rule-cond-cell">
+                        <div class="rname">${r.name || '—'}</div>
+                        <div class="rcond">${condStr}</div>
+                        <div class="r-togglers"><div class="rule-toggle ${r.enabled ? 'on' : ''}" onclick="toggleRule(${i})"></div> <span style="font-size:12px;color:#888;vertical-align:middle;">Работает</span> &middot; → ${acts}</div>
                     </td>
-                    <td><div class="active-dot ${isActive ? 'on' : ''}"></div></td>
                     <td><button class="del" onclick="removeRule(${i})">Удалить</button></td>
                 </tr>`;
             });
@@ -283,7 +352,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             const actsDiv = document.getElementById('actuatorsList');
             actsDiv.innerHTML = '';
             channels.filter(c => c.type === 'relay').forEach(c => {
-                actsDiv.innerHTML += `<label><input type="checkbox" value="${c.pin}"> ${pinNames[c.pin] || c.pin}${c.name ? ` (${c.name})` : ''}</label>`;
+                actsDiv.innerHTML += `<label style="display:block;padding:4px 0;white-space:nowrap;"><input type="checkbox" value="${c.pin}" style="width:auto;margin:0;vertical-align:middle;"> <span style="vertical-align:middle;">${pinNames[c.pin] || c.pin}${c.name ? ` (${c.name})` : ''}</span></label>`;
             });
         }
 
@@ -339,7 +408,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             const config = {
                 channels,
                 rules,
+                deviceName: document.getElementById('deviceName').value.trim(),
                 serverUrl: document.getElementById('serverUrl').value.trim(),
+                period: parseInt(document.getElementById('periodSelect').value) || 60,
                 ssid: document.getElementById('wifiSsid').value.trim(),
                 pass: document.getElementById('wifiPass').value
             };
@@ -351,6 +422,45 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             
             if (res.ok) alert("Сохранено! Перезагрузка...");
             else alert("Ошибка валидации: " + await res.text());
+        }
+
+        async function downloadConfig() {
+            const res = await fetch('/api/config');
+            const data = await res.json();
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'esp_config.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        async function uploadConfig() {
+            const fileInput = document.getElementById('configFileInput');
+            if (!fileInput.files.length) { alert("Выберите файл конфигурации!"); return; }
+            const file = fileInput.files[0];
+            const text = await file.text();
+            try {
+                const config = JSON.parse(text);
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        channels: config.channels || [],
+                        rules: config.rules || [],
+                        deviceName: config.deviceName || '',
+                        serverUrl: config.serverUrl || '',
+                        period: config.period || 60,
+                        ssid: config.ssid || '',
+                        pass: config.pass || ''
+                    })
+                });
+                if (res.ok) alert("Конфиг загружен! Перезагрузка...");
+                else alert("Ошибка: " + await res.text());
+            } catch (e) {
+                alert("Ошибка парсинга JSON: " + e.message);
+            }
         }
 
         async function updateStatus() {
@@ -373,10 +483,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 let html = '';
                 data.relays.forEach(r => {
                     const label = pinNames[r.pin] || r.pin;
-                    const btnClass = r.state ? 'toggle on' : 'toggle off';
+                    const dotClass = r.state ? 'status-dot on' : 'status-dot off';
                     html += `<div class="status-item">
-                        <span>${label}${r.name ? ` (${r.name})` : ''}</span>
-                        <button class="${btnClass}" onclick="toggleRelay(${r.pin}, ${!r.state})">${r.state ? 'Выкл' : 'Вкл'}</button>
+                        <span><span class="${dotClass}"></span>${label}${r.name ? ` (${r.name})` : ''}</span>
+                        <button class="toggle" onclick="toggleRelay(${r.pin}, ${!r.state})">Переключить</button>
                     </div>`;
                 });
                 document.getElementById('relayStatus').innerHTML = html || '<i>Нет реле</i>';

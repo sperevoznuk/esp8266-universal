@@ -42,12 +42,15 @@ void handleGetSensors() {
 
 void handleGetConfig() {
     DynamicJsonDocument doc(4096);
+    doc["deviceName"] = g_config.deviceName;
     doc["serverUrl"] = g_config.serverUrl;
+    doc["period"] = g_config.period;
     
-    // Текущий сохраненный SSID из флеша ESP
+    // Текущий сохраненный SSID и пароль из флеша ESP
     struct station_config conf;
     wifi_station_get_config(&conf);
     doc["ssid"] = String((char*)conf.ssid);
+    doc["pass"] = String((char*)conf.password);
     
     JsonArray chArr = doc.createNestedArray("channels");
     for (auto& ch : g_config.channels) {
@@ -147,8 +150,9 @@ void handleSaveConfig() {
     g_config.channels.clear();
     g_config.rules.clear();
     
-    // Server URL для HTTP интеграции
+    g_config.deviceName = doc["deviceName"] | "";
     g_config.serverUrl = doc["serverUrl"] | "";
+    g_config.period = doc["period"] | 60;
     
     for (JsonVariantConst c : doc["channels"].as<JsonArrayConst>()) {
         Channel ch; ch.type = c["type"].as<String>(); ch.pin = c["pin"]; ch.name = c["name"].as<String>();
@@ -239,6 +243,63 @@ void handleApiStatus() {
     server.send(200, "application/json", out);
 }
 
+void handleApiTelemetry() {
+    DynamicJsonDocument doc(4096);
+    
+    doc["device"] = g_config.deviceName.length() > 0 ? g_config.deviceName : "ESP8266-Universal";
+    
+    // sensors: все "датчики" (реле, кнопки, DS18B20) с name/value/type
+    JsonArray sArr = doc.createNestedArray("sensors");
+    for (auto& ch : g_config.channels) {
+        if (ch.type == "relay") {
+            JsonObject o = sArr.createNestedObject();
+            o["name"] = ch.name.length() > 0 ? ch.name : "D" + String(ch.pin);
+            o["value"] = channels::getRelayState(ch.pin);
+            o["type"] = "relay";
+        } else if (ch.type == "button") {
+            JsonObject o = sArr.createNestedObject();
+            o["name"] = ch.name.length() > 0 ? ch.name : "D" + String(ch.pin);
+            o["value"] = channels::getButtonState(ch.pin);
+            o["type"] = "button";
+        }
+    }
+    // Температурные датчики — каждый отдельный элемент
+    for (auto& b : sensors::buses) {
+        b.dt->requestTemperatures();
+        int count = b.dt->getDeviceCount();
+        for (int i = 0; i < count; i++) {
+            DeviceAddress addr;
+            if (b.dt->getAddress(addr, i)) {
+                float temp = b.dt->getTempC(addr);
+                if (temp != DEVICE_DISCONNECTED_C) {
+                    char romStr[17];
+                    for (int j = 0; j < 8; j++) {
+                        sprintf(romStr + (j * 2), "%02x", addr[j]);
+                    }
+                    JsonObject o = sArr.createNestedObject();
+                    o["name"] = romStr;
+                    o["value"] = temp;
+                    o["type"] = "temperature";
+                }
+            }
+        }
+    }
+    
+    // Правила — только id, name, enabled, triggered
+    JsonArray rArr = doc.createNestedArray("rules");
+    for (auto& r : g_config.rules) {
+        JsonObject ro = rArr.createNestedObject();
+        ro["id"] = r.id;
+        ro["name"] = r.name;
+        ro["enabled"] = r.enabled;
+        ro["triggered"] = r.active;
+    }
+
+    String out;
+    serializeJson(doc, out);
+    server.send(200, "application/json", out);
+}
+
 void handleApiRelay() {
     if (!server.hasArg("plain")) return;
     StaticJsonDocument<256> doc;
@@ -262,6 +323,7 @@ void setup() {
     server.on("/api/config", HTTP_POST, handleSaveConfig);
     server.on("/api/sensors", HTTP_GET, handleGetSensors);
     server.on("/api/status", HTTP_GET, handleApiStatus);
+    server.on("/api/telemetry", HTTP_GET, handleApiTelemetry);
     server.on("/api/relay", HTTP_POST, handleApiRelay);
     
     server.onNotFound([]() {

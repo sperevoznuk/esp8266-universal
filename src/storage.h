@@ -13,7 +13,9 @@ namespace storage {
     inline bool save() {
         DynamicJsonDocument doc(4096);
         
+        doc["deviceName"] = g_config.deviceName;
         doc["serverUrl"] = g_config.serverUrl;
+        doc["period"] = g_config.period;
         
         JsonArray channelsArray = doc.createNestedArray("channels");
         for (const auto& ch : g_config.channels) {
@@ -76,7 +78,9 @@ namespace storage {
             return false;
         }
 
+        g_config.deviceName = doc["deviceName"] | "";
         g_config.serverUrl = doc["serverUrl"] | "";
+        g_config.period = doc["period"] | 60;
         
         g_config.channels.clear();
         for (JsonObject c : doc["channels"].as<JsonArray>()) {
