@@ -74,10 +74,14 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         .ch-name-line { font-weight: bold; font-size: 14px; margin-bottom: 3px; }
         .ch-type-line { font-size: 12px; color: #555; }
         #actuatorsList label { display: block; padding: 4px 0; }
+        .action-btns { display: flex; gap: 5px; flex-wrap: nowrap; }
+        .action-btns button { flex: 1; min-width: 0; }
         @media (max-width: 600px) {
             .row { flex-direction: column; gap: 5px; }
             .row .col { width: 100%; }
             .row button { width: 100% !important; margin-bottom: 5px !important; }
+            .action-btns { flex-direction: column; gap: 5px; }
+            .action-btns button { width: 100%; }
         }
     </style>
 </head>
@@ -149,6 +153,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     <div class="col" id="sensorParams" style="display:flex; gap:5px;">
                         <input type="number" id="ruleTarget" placeholder="Target °C" step="0.1">
                         <input type="number" id="ruleHyst" placeholder="Гистерезис" step="0.1" value="0.5">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col">
+                        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="ruleEnabled" checked> Работает</label>
                     </div>
                 </div>
                 <div class="row">
@@ -388,14 +397,14 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             renderTables();
         }
 
-        function removeChannel(i) { channels.splice(i, 1); renderTables(); }
+        function removeChannel(i) { if (confirm('Удалить канал?')) { channels.splice(i, 1); renderTables(); } }
         
         function toggleRule(i) {
             rules[i].enabled = !rules[i].enabled;
             renderTables();
         }
         
-        function removeRule(i) { rules.splice(i, 1); renderTables(); }
+        function removeRule(i) { if (confirm('Удалить правило?')) { rules.splice(i, 1); renderTables(); } }
 
         function editRule(i) {
             editRuleIndex = i;
@@ -421,6 +430,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     cb.checked = r.actuators.includes(parseInt(cb.value));
                 });
             }, 0);
+            document.getElementById('ruleEnabled').checked = r.enabled;
             document.getElementById('addRuleBtn').textContent = 'Обновить правило';
         }
 
@@ -460,7 +470,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             // Генерация простого ID
             const id = Math.random().toString(16).substr(2, 8);
             
-            rules.push({ id, name, enabled: true, cond, actuators: acts });
+            const enabled = document.getElementById('ruleEnabled').checked;
+            rules.push({ id, name, enabled, cond, actuators: acts });
             renderTables();
         }
 
@@ -546,7 +557,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     const dotClass = r.state ? 'status-dot on' : 'status-dot off';
                     html += `<div class="status-item">
                         <span><span class="${dotClass}"></span>${label}${r.name ? ` (${r.name})` : ''}</span>
-                        <button class="toggle" onclick="toggleRelay(${r.pin}, ${!r.state})">Переключить</button>
+                        <button class="toggle" onclick="toggleRelay(${r.pin}, ${!r.state})">Перекл</button>
                     </div>`;
                 });
                 document.getElementById('relayStatus').innerHTML = html || '<i>Нет реле</i>';
