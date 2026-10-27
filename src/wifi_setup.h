@@ -25,13 +25,77 @@ namespace wifiSetup {
         String ssid = mainServer->arg("ssid");
         String pass = mainServer->arg("pass");
         logf("Получена форма настройки. SSID: %s", ssid.c_str());
-        
-        mainServer->send(200, "text/html; charset=utf-8", "<h2>Сохранено!</h2><p>Перезагрузка...</p>");
-        
-        WiFi.mode(WIFI_STA);
+
+        // Сохраняем AP активным, чтобы клиент получил ответ
+        WiFi.mode(WIFI_AP_STA);
         WiFi.begin(ssid.c_str(), pass.c_str());
-        delay(2000);
-        ESP.restart();
+
+        // Ждём подключения с таймаутом 15 секунд
+        unsigned long start = millis();
+        bool connected = false;
+        while (millis() - start < 15000) {
+            // Нужно крутить DNS, чтобы клиент не терял связь с порталом
+            dnsServer.processNextRequest();
+            delay(200);
+            if (WiFi.status() == WL_CONNECTED) {
+                connected = true;
+                break;
+            }
+        }
+
+        if (connected) {
+            String ip = WiFi.localIP().toString();
+            logf("Успешно подключен к %s! IP: %s", ssid.c_str(), ip.c_str());
+
+            // Отправляем ответ клиенту через AP до выключения
+            String html = String("") +
+                "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+                "<meta http-equiv=\"refresh\" content=\"5;url=http://" + ip + "/\">"
+                "<style>"
+                "body{font-family:sans-serif;text-align:center;padding:20px;background:#f4f7f6;}"
+                ".success{color:#28a745;font-size:24px;}"
+                ".ip{font-size:20px;background:#e9ecef;padding:10px;border-radius:5px;display:inline-block;margin:10px 0;}"
+                ".spinner{border:4px solid #f3f3f3;border-top:4px solid #28a745;border-radius:50%;width:40px;height:40px;animation:spin 1s linear infinite;margin:20px auto;}"
+                "@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}"
+                "</style>"
+                "</head><body>"
+                "<h2 class=\"success\">✓ Подключение успешно!</h2>"
+                "<p>IP адрес устройства:</p>"
+                "<div class=\"ip\"><a href='http://" + ip + "/'>" + ip + "</a></div>"
+                "<div class=\"spinner\"></div>"
+                "<p>Перенаправление через 5 секунд...</p>"
+                "<p>Если перенаправление не произошло — подключитесь к сети <b>" + ssid + "</b> и перейдите по <a href='http://" + ip + "/'>ссылке</a></p>"
+                "<script>setTimeout(function(){window.location.href='http://" + ip + "/';},5000);</script>"
+                "</body></html>";
+
+            mainServer->send(200, "text/html; charset=utf-8", html);
+            mainServer->client().flush();
+            delay(100);
+
+            // Сохраняем во flash и переключаемся в STA
+            WiFi.persistent(true);
+            WiFi.mode(WIFI_STA);
+            WiFi.begin(ssid.c_str(), pass.c_str());
+            delay(500);
+            ESP.restart();
+        } else {
+            logf("Ошибка подключения к %s (status=%d)", ssid.c_str(), WiFi.status());
+            String html = String("") +
+                "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+                "<style>"
+                "body{font-family:sans-serif;text-align:center;padding:20px;background:#f4f7f6;}"
+                ".error{color:#dc3545;font-size:24px;}"
+                ".btn{display:inline-block;padding:10px 20px;background:#007bff;color:white;text-decoration:none;border-radius:5px;font-size:16px;margin-top:15px;}"
+                "</style>"
+                "</head><body>"
+                "<h2 class=\"error\">✗ Ошибка подключения</h2>"
+                "<p>Не удалось подключиться к <b>" + ssid + "</b>.</p>"
+                "<p>Проверьте правильность пароля и попробуйте снова.</p>"
+                "<br><a href=\"/\" class=\"btn\">← Вернуться к настройкам</a>"
+                "</body></html>";
+            mainServer->send(200, "text/html; charset=utf-8", html);
+            // Остаёмся в AP-режиме, без перезагрузки
+        }
     }
 
     inline void startConfigPortal() {

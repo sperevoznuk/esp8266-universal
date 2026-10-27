@@ -307,6 +307,35 @@ void handleApiRelay() {
     channels::setRelay(doc["pin"], doc["state"]);
     server.send(200, "application/json", "{\"status\":\"ok\"}");
 }
+void handleScan() {
+    int n = WiFi.scanComplete();
+    if (n == WIFI_SCAN_FAILED) {
+        WiFi.scanNetworks(true);
+        server.send(200, "application/json", "[]");
+        return;
+    }
+    if (n == WIFI_SCAN_RUNNING) {
+        server.send(200, "application/json", "[]");
+        return;
+    }
+    if (n <= 0) {
+        server.send(200, "application/json", "[]");
+        return;
+    }
+    
+    DynamicJsonDocument doc(2048);
+    JsonArray arr = doc.to<JsonArray>();
+    for (int i = 0; i < n; i++) {
+        JsonObject net = arr.createNestedObject();
+        net["ssid"] = WiFi.SSID(i);
+        net["rssi"] = WiFi.RSSI(i);
+        net["open"] = (WiFi.encryptionType(i) == ENC_TYPE_NONE);
+    }
+    String out;
+    serializeJson(doc, out);
+    WiFi.scanDelete();
+    server.send(200, "application/json", out);
+}
 
 void setup() {
     Serial.begin(115200);
@@ -325,6 +354,7 @@ void setup() {
     server.on("/api/status", HTTP_GET, handleApiStatus);
     server.on("/api/telemetry", HTTP_GET, handleApiTelemetry);
     server.on("/api/relay", HTTP_POST, handleApiRelay);
+    server.on("/api/scan", handleScan);
     
     server.onNotFound([]() {
         if (wifiSetup::isConfigMode) {
