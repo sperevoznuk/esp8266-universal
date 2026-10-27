@@ -75,6 +75,14 @@ void handleGetConfig() {
         for (uint8_t a : r.actuators) acts.add(a);
     }
     
+    // Имена датчиков
+    JsonArray snArr = doc.createNestedArray("sensorNames");
+    for (const auto& sn : g_config.sensorNames) {
+        JsonObject o = snArr.createNestedObject();
+        o["rom"] = sn.rom;
+        o["name"] = sn.name;
+    }
+    
     String out;
     serializeJson(doc, out);
     server.send(200, "application/json", out);
@@ -173,6 +181,14 @@ void handleSaveConfig() {
         for (JsonVariantConst a : acts) rule.actuators.push_back(a);
         g_config.rules.push_back(rule);
     }
+    
+    g_config.sensorNames.clear();
+    for (JsonVariantConst sn : doc["sensorNames"].as<JsonArrayConst>()) {
+        SensorNameEntry e;
+        e.rom = sn["rom"].as<String>();
+        e.name = sn["name"].as<String>();
+        g_config.sensorNames.push_back(e);
+    }
 
     storage::save();
     
@@ -230,6 +246,10 @@ void handleApiStatus() {
     // Датчики
     JsonArray temps = doc.createNestedArray("sensors");
     sensors::readAll(temps);
+    // Добавляем имена датчиков
+    for (JsonObject s : temps) {
+        s["name"] = sensors::getNameByRom(s["id"].as<String>());
+    }
     
     // Правила (только active)
     JsonArray ruleStates = doc.createNestedArray("rules");
@@ -277,8 +297,10 @@ void handleApiTelemetry() {
                         sprintf(romStr + (j * 2), "%02x", addr[j]);
                     }
                     JsonObject o = sArr.createNestedObject();
-                    o["name"] = romStr;
-                    o["value"] = temp;
+                    String rom = String(romStr);
+                    String sn = sensors::getNameByRom(rom);
+                    o["name"] = sn.length() > 0 ? sn : rom;
+                    o["value"] = round2(temp);
                     o["type"] = "temperature";
                 }
             }

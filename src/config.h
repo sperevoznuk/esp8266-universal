@@ -32,12 +32,18 @@ struct Rule {
     std::vector<uint8_t> actuators; // Массив пинов реле
 };
 
+struct SensorNameEntry {
+    String rom;
+    String name;
+};
+
 struct Config {
     String deviceName;
     String serverUrl;
     uint16_t period = 60; // период отправки телеметрии в секундах
     std::vector<Channel> channels; 
     std::vector<Rule> rules;
+    std::vector<SensorNameEntry> sensorNames;
 };
 
 inline Config g_config;

@@ -7,6 +7,14 @@
 
 namespace sensors {
 
+    // Получить имя датчика по ROM (из g_config.sensorNames)
+    inline String getNameByRom(const String& rom) {
+        for (const auto& sn : g_config.sensorNames) {
+            if (sn.rom == rom) return sn.name;
+        }
+        return "";
+    }
+
     struct SensorBus {
         uint8_t pin;
         OneWire* oneWire;
@@ -79,7 +87,7 @@ namespace sensors {
                         
                         JsonObject o = arr.createNestedObject();
                         o["id"] = romStr;
-                        o["t"] = temp;
+                        o["t"] = fmt2(temp);
                     }
                 }
             }
@@ -99,7 +107,8 @@ namespace sensors {
                     }
                     JsonObject o = arr.createNestedObject();
                     o["rom"] = romStr;
-                    o["t"] = b.dt->getTempC(addr);
+                    o["t"] = fmt2(b.dt->getTempC(addr));
+                    o["name"] = getNameByRom(String(romStr));
                 }
             }
         }

@@ -25,6 +25,13 @@ namespace storage {
             c["name"] = ch.name;
         }
 
+        JsonArray snArr = doc.createNestedArray("sensorNames");
+        for (const auto& sn : g_config.sensorNames) {
+            JsonObject o = snArr.createNestedObject();
+            o["rom"] = sn.rom;
+            o["name"] = sn.name;
+        }
+
         JsonArray rulesArray = doc.createNestedArray("rules");
         for (const auto& r : g_config.rules) {
             JsonObject jr = rulesArray.createNestedObject();
@@ -110,7 +117,15 @@ namespace storage {
             g_config.rules.push_back(r);
         }
 
-        logf("Конфигурация загружена. Каналов: %d, Правил: %d", g_config.channels.size(), g_config.rules.size());
+        g_config.sensorNames.clear();
+        for (JsonObject sn : doc["sensorNames"].as<JsonArray>()) {
+            SensorNameEntry e;
+            e.rom = sn["rom"].as<String>();
+            e.name = sn["name"] | "";
+            g_config.sensorNames.push_back(e);
+        }
+
+        logf("Конфигурация загружена. Каналов: %d, Правил: %d, Имён датчиков: %d", g_config.channels.size(), g_config.rules.size(), g_config.sensorNames.size());
         return true;
     }
 
