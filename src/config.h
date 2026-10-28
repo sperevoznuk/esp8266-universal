@@ -17,18 +17,28 @@ struct Channel {
 
 struct Condition {
     String type;    // "sensor", "button", "relay"
-    String rom;     // Только для sensor (12 hex)
+    String rom;     // Только для sensor
     uint8_t pin;    // Только для button/relay
+};
+
+struct SensorCondition {
+    String rom;
+    float target;
+    float hysteresis;
+    bool mode;          // true = "+" (нагрев), false = "-" (охлаждение)
+    bool active = false; // Runtime: гистерезис каждого датчика (не сериализуется)
 };
 
 struct Rule {
     String id;
     bool enabled;   // Задается пользователем
     bool active;    // Вычисляется прошивкой (в JSON не сохраняется)
+    bool prevEnabled = true; // Предыдущее состояние enabled (runtime, не сериализуется)
     String name;
-    Condition cond;
-    float target;       // Только для sensor
-    float hysteresis;   // Только для sensor
+    String condType; // "sensor", "button", "relay"
+    String combine;  // "and" — все условия, "or" — любое условие
+    std::vector<SensorCondition> sensors;   // 0-3 для type=="sensor"
+    std::vector<uint8_t> sourcePins;        // 1-3 для type=="button" или "relay"
     std::vector<uint8_t> actuators; // Массив пинов реле
 };
 

@@ -145,18 +145,18 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 <div class="row">
                     <div class="col"><input type="text" id="ruleName" placeholder="Имя правила (до 25 симв.)" maxlength="25"></div>
                     <div class="col"><select id="ruleCondType" onchange="updateRuleSource()">
-                        <option value="sensor">Датчик</option>
+                        <option value="sensor">Датчик(и)</option>
                         <option value="button">Кнопка</option>
                         <option value="relay">Реле</option>
                     </select></div>
                 </div>
                 <div class="row">
-                    <div class="col"><select id="ruleSource"></select></div>
-                    <div class="col" id="sensorParams" style="display:flex; gap:5px;">
-                        <input type="number" id="ruleTarget" placeholder="Target °C" step="0.1">
-                        <input type="number" id="ruleHyst" placeholder="Гистерезис" step="0.1" value="0.5">
-                    </div>
+                    <div class="col"><select id="ruleCombine">
+                        <option value="and">И (все условия)</option>
+                        <option value="or">ИЛИ (любое условие)</option>
+                    </select></div>
                 </div>
+                <div id="sourceRows"></div>
                 <div class="row">
                     <div class="col">
                         <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="ruleEnabled" checked> Работает</label>
@@ -391,11 +391,19 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             rBody.innerHTML = '';
             rules.forEach((r, i) => {
                 let condStr = '';
-                if (r.cond.type === 'sensor') {
-                    const sname = getSensorName(r.cond.rom);
-                    condStr = `Датчик: ${sname || r.cond.rom} &lt;= ${r.cond.target}°C (h:${Number(r.cond.hysteresis).toFixed(1)})`;
+                if (r.condType === 'sensor') {
+                    const combineLabel = r.combine === 'or' ? ' ИЛИ ' : '; ';
+                    condStr = (r.sensors || []).map((s, idx) => {
+                        const sname = getSensorName(s.rom);
+                        const modeOp = s.mode ? '≤' : '≥';
+                        return `${sname || s.rom} ${modeOp}${Number(s.target).toFixed(1)}°C (h:${Number(s.hysteresis).toFixed(1)})`;
+                    }).join(combineLabel);
                 } else {
-                    condStr = `${r.cond.type === 'relay' ? 'Реле' : 'Кнопка'} ${pinNames[r.cond.pin] || r.cond.pin}`;
+                    const typeLabel = r.condType === 'relay' ? 'Реле' : 'Кнопка';
+                    const combineLabel = r.combine === 'or' ? ' ИЛИ ' : '; ';
+                    condStr = (r.sourcePins || []).map((p, idx) => {
+                        return `${typeLabel}${idx+1}: ${pinNames[p] || p}`;
+                    }).join(combineLabel);
                 }
                 const acts = r.actuators.map(p => pinNames[p] || p).join(', ');
                 const isActive = r.active || false;
@@ -416,31 +424,125 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
         // Обновление полей формы в зависимости от типа условия
         function updateRuleSource() {
-            const type = document.getElementById('ruleCondType').value;
-            const srcSelect = document.getElementById('ruleSource');
-            const sensorParams = document.getElementById('sensorParams');
-            
-            srcSelect.innerHTML = '';
-            if (type === 'sensor') {
-                sensorParams.style.display = 'flex';
-                availableSensors.forEach(s => {
-                    const sn = getSensorName(s.rom);
-                    const label = sn ? sn + ' (' + s.rom + ')' : s.rom;
-                    srcSelect.innerHTML += `<option value="${s.rom}">${label} (${s.t}°C)</option>`;
-                });
-            } else {
-                sensorParams.style.display = 'none';
-                channels.filter(c => c.type === type).forEach(c => {
-                    srcSelect.innerHTML += `<option value="${c.pin}">${pinNames[c.pin] || c.pin} (${c.name || 'без имени'})</option>`;
-                });
-            }
-
+            renderSourceRows();
             // Обновление чекбоксов для actuators (только реле)
             const actsDiv = document.getElementById('actuatorsList');
             actsDiv.innerHTML = '';
             channels.filter(c => c.type === 'relay').forEach(c => {
                 actsDiv.innerHTML += `<label style="display:block;padding:4px 0;white-space:nowrap;"><input type="checkbox" value="${c.pin}" style="width:auto;margin:0;vertical-align:middle;"> <span style="vertical-align:middle;">${pinNames[c.pin] || c.pin}${c.name ? ` (${c.name})` : ''}</span></label>`;
             });
+        }
+
+        // Количество строк источников (датчиков/кнопок/реле)
+        let currentSourceCount = 1;
+
+        function renderSourceRows(savedValues) {
+            const type = document.getElementById('ruleCondType').value;
+            const container = document.getElementById('sourceRows');
+
+            // Сохраняем значения текущих строк (если не переданы через savedValues)
+            const saved = savedValues || collectSourceRowValues();
+            const isSensor = type === 'sensor';
+            const addLabel = isSensor ? 'датчик' : (type === 'button' ? 'кнопку' : 'реле');
+
+            let html = '';
+            for (let i = 0; i < saved.length; i++) {
+                html += `<div class="row source-row" data-idx="${i}">
+                    <div class="col"><select id="srcSel${i}" class="src-sel"></select></div>
+                    ${isSensor ? `
+                    <div class="col" style="flex:0.5;"><input type="number" id="srcTarget${i}" class="src-target" placeholder="Цель °C" step="0.1"></div>
+                    <div class="col" style="flex:0.5;"><input type="number" id="srcHyst${i}" class="src-hyst" placeholder="Гистерезис" step="0.1" value="0.5"></div>
+                    <div class="col" style="flex:0.3;"><select id="srcMode${i}" class="src-mode">
+                        <option value="true">≤</option>
+                        <option value="false">≥</option>
+                    </select></div>` : ''}
+                    <div class="col" style="flex:0.15;">
+                        ${i > 0 ? `<button class="del" style="width:auto;padding:4px 8px;margin:0;font-size:12px;" onclick="removeSourceRow(${i})">✕</button>` : ''}
+                    </div>
+                </div>`;
+            }
+            if (saved.length < 3) {
+                html += `<div style="text-align:right;margin-top:4px;"><button onclick="addSourceRow()" style="background:#17a2b8;font-size:13px;width:auto;padding:5px 12px;">+ Добавить ${addLabel}</button></div>`;
+            }
+            container.innerHTML = html;
+
+            // Восстанавливаем значения (заполнение селектов + поля)
+            for (let i = 0; i < saved.length; i++) {
+                const s = saved[i] || { source: '', target: '', hyst: '0.5', mode: 'true' };
+
+                const sel = document.getElementById(`srcSel${i}`);
+                sel.innerHTML = `<option value="">— выберите ${addLabel} —</option>`;
+                if (isSensor) {
+                    availableSensors.forEach(sn => {
+                        const sname = getSensorName(sn.rom) || sn.rom;
+                        sel.innerHTML += `<option value="${sn.rom}">${sname} (${sn.t}°C)</option>`;
+                    });
+                } else {
+                    channels.filter(c => c.type === type).forEach(c => {
+                        const label = pinNames[c.pin] || c.pin;
+                        sel.innerHTML += `<option value="${c.pin}">${label}${c.name ? ` (${c.name})` : ''}</option>`;
+                    });
+                }
+                if (s.source !== undefined && s.source !== '') {
+                    for (let opt of sel.options) {
+                        if (opt.value === String(s.source)) { opt.selected = true; break; }
+                    }
+                }
+
+                if (isSensor) {
+                    const tInp = document.getElementById(`srcTarget${i}`);
+                    const hInp = document.getElementById(`srcHyst${i}`);
+                    const mSel = document.getElementById(`srcMode${i}`);
+                    if (tInp) tInp.value = s.target;
+                    if (hInp) hInp.value = s.hyst;
+                    if (mSel) mSel.value = s.mode;
+                }
+            }
+        }
+
+        // Сбор значений строк из DOM (по currentSourceCount)
+        function collectSourceRowValues() {
+            const type = document.getElementById('ruleCondType').value;
+            const isSensor = type === 'sensor';
+            const saved = [];
+            for (let i = 0; i < currentSourceCount; i++) {
+                const sel = document.getElementById(`srcSel${i}`);
+                if (isSensor) {
+                    const tEl = document.getElementById(`srcTarget${i}`);
+                    const hEl = document.getElementById(`srcHyst${i}`);
+                    const mEl = document.getElementById(`srcMode${i}`);
+                    saved.push({
+                        source: sel ? sel.value : '',
+                        target: tEl ? tEl.value : '',
+                        hyst: hEl ? hEl.value : '0.5',
+                        mode: mEl ? mEl.value : 'true'
+                    });
+                } else {
+                    saved.push({ source: sel ? sel.value : '' });
+                }
+            }
+            return saved;
+        }
+
+        function addSourceRow() {
+            if (currentSourceCount < 3) {
+                const saved = collectSourceRowValues();
+                const obj = document.getElementById('ruleCondType').value === 'sensor'
+                    ? { source: '', target: '', hyst: '0.5', mode: 'true' }
+                    : { source: '' };
+                saved.push(obj);
+                currentSourceCount = saved.length;
+                renderSourceRows(saved);
+            }
+        }
+
+        function removeSourceRow(idx) {
+            if (currentSourceCount > 1) {
+                const saved = collectSourceRowValues();
+                saved.splice(idx, 1); // Удаляем именно выбранную строку
+                currentSourceCount = saved.length;
+                renderSourceRows(saved);
+            }
         }
 
         function editChannel(i) {
@@ -478,6 +580,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         function toggleRule(i) {
             rules[i].enabled = !rules[i].enabled;
             renderTables();
+            silentSave();
         }
         
         function removeRule(i) { if (confirm('Удалить правило?')) { rules.splice(i, 1); renderTables(); } }
@@ -486,34 +589,56 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             editRuleIndex = i;
             const r = rules[i];
             document.getElementById('ruleName').value = r.name || '';
-            document.getElementById('ruleCondType').value = r.cond.type;
-            // Обновить список источников
+            document.getElementById('ruleCondType').value = r.condType || 'sensor';
+            document.getElementById('ruleCombine').value = r.combine || 'and';
+            document.getElementById('ruleEnabled').checked = r.enabled;
+
+            // Определяем количество строк по количеству источников правила
+            if ((r.condType || 'sensor') === 'sensor') {
+                const sensors = r.sensors || [];
+                currentSourceCount = Math.min(Math.max(sensors.length, 1), 3);
+            } else {
+                const pins = r.sourcePins || [];
+                currentSourceCount = Math.min(Math.max(pins.length, 1), 3);
+            }
+
             updateRuleSource();
-            // В sensorParams уже подставлены source и числа, ждём микротаск
+
             setTimeout(() => {
-                // Выбрать source
-                const srcSelect = document.getElementById('ruleSource');
-                const srcVal = r.cond.type === 'sensor' ? r.cond.rom : String(r.cond.pin);
-                for (let opt of srcSelect.options) {
-                    if (opt.value === srcVal) { opt.selected = true; break; }
+                const type = r.condType || 'sensor';
+                const isSensor = type === 'sensor';
+                for (let i = 0; i < currentSourceCount; i++) {
+                    const sel = document.getElementById(`srcSel${i}`);
+                    const sourceVal = isSensor ? (r.sensors || [])[i]?.rom : (r.sourcePins || [])[i];
+                    if (sel && sourceVal !== undefined) {
+                        for (let opt of sel.options) {
+                            if (opt.value === String(sourceVal)) { opt.selected = true; break; }
+                        }
+                    }
+                    if (isSensor) {
+                        const sc = (r.sensors || [])[i];
+                        if (!sc) continue;
+                        const tInp = document.getElementById(`srcTarget${i}`);
+                        const hInp = document.getElementById(`srcHyst${i}`);
+                        const mSel = document.getElementById(`srcMode${i}`);
+                        if (tInp) tInp.value = sc.target;
+                        if (hInp) hInp.value = sc.hysteresis || 0.5;
+                        if (mSel) mSel.value = sc.mode ? 'true' : 'false';
+                    }
                 }
-                if (r.cond.type === 'sensor') {
-                    document.getElementById('ruleTarget').value = r.cond.target;
-                    document.getElementById('ruleHyst').value = r.cond.hysteresis || 0.5;
-                }
+
                 // Отметить актуаторы
                 document.querySelectorAll('#actuatorsList input').forEach(cb => {
                     cb.checked = r.actuators.includes(parseInt(cb.value));
                 });
             }, 0);
-            document.getElementById('ruleEnabled').checked = r.enabled;
+
             document.getElementById('addRuleBtn').textContent = 'Обновить правило';
         }
 
         function addRule() {
             const name = document.getElementById('ruleName').value.trim();
             const type = document.getElementById('ruleCondType').value;
-            const source = document.getElementById('ruleSource').value;
             
             // Сбор выбранных реле
             const acts = [];
@@ -523,32 +648,110 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             
             if (acts.length === 0) { alert("Выберите хотя бы одно реле!"); return; }
             
-            let cond = { type };
-            if (type === 'sensor') {
-                cond.rom = source;
-                cond.target = parseFloat(document.getElementById('ruleTarget').value) || 0;
-                cond.hysteresis = parseFloat(document.getElementById('ruleHyst').value) || 0.5;
-            } else {
-                cond.pin = parseInt(source);
-            }
-            
-            if (editRuleIndex >= 0) {
-                // Режим редактирования
-                rules[editRuleIndex].name = name;
-                rules[editRuleIndex].cond = cond;
-                rules[editRuleIndex].actuators = acts;
-                editRuleIndex = -1;
-                document.getElementById('addRuleBtn').textContent = 'Добавить правило';
-                renderTables();
-                return;
-            }
-            
-            // Генерация простого ID
-            const id = Math.random().toString(16).substr(2, 8);
-            
             const enabled = document.getElementById('ruleEnabled').checked;
-            rules.push({ id, name, enabled, cond, actuators: acts });
+            const combine = document.getElementById('ruleCombine').value;
+            const rows = collectSourceRowValues();
+            
+            if (type === 'sensor') {
+                // Собираем данные с строк датчиков
+                const sensors = [];
+                for (let i = 0; i < rows.length; i++) {
+                    const row = rows[i];
+                    if (!row.source) { alert(`Выберите датчик в строке ${i+1}!`); return; }
+                    sensors.push({
+                        rom: row.source,
+                        target: parseFloat(row.target) || 0,
+                        hysteresis: parseFloat(row.hyst) || 0.5,
+                        mode: row.mode === 'true'
+                    });
+                }
+                if (sensors.length === 0) { alert("Добавьте хотя бы один датчик!"); return; }
+
+                if (editRuleIndex >= 0) {
+                    rules[editRuleIndex].name = name;
+                    rules[editRuleIndex].condType = type;
+                    rules[editRuleIndex].combine = combine;
+                    rules[editRuleIndex].sensors = sensors;
+                    rules[editRuleIndex].sourcePins = [];
+                    rules[editRuleIndex].actuators = acts;
+                    rules[editRuleIndex].enabled = enabled;
+                    editRuleIndex = -1;
+                    document.getElementById('addRuleBtn').textContent = 'Добавить правило';
+                    renderTables(); silentSave(); resetRuleForm();
+                    return;
+                }
+                
+                const id = Math.random().toString(16).substr(2, 8);
+                rules.push({ id, name, enabled, condType: type, combine, sensors, sourcePins: [], actuators: acts });
+            } else {
+                // Собираем пины кнопок/реле
+                const sourcePins = [];
+                for (let i = 0; i < rows.length; i++) {
+                    const row = rows[i];
+                    if (!row.source) { alert(`Выберите ${type === 'button' ? 'кнопку' : 'реле'} в строке ${i+1}!`); return; }
+                    sourcePins.push(parseInt(row.source));
+                }
+                if (sourcePins.length === 0) { alert("Добавьте хотя бы один источник!"); return; }
+
+                if (editRuleIndex >= 0) {
+                    rules[editRuleIndex].name = name;
+                    rules[editRuleIndex].condType = type;
+                    rules[editRuleIndex].combine = combine;
+                    rules[editRuleIndex].sourcePins = sourcePins;
+                    rules[editRuleIndex].sensors = [];
+                    rules[editRuleIndex].actuators = acts;
+                    rules[editRuleIndex].enabled = enabled;
+                    editRuleIndex = -1;
+                    document.getElementById('addRuleBtn').textContent = 'Добавить правило';
+                    renderTables(); silentSave(); resetRuleForm();
+                    return;
+                }
+                
+                const id = Math.random().toString(16).substr(2, 8);
+                rules.push({ id, name, enabled, condType: type, combine, sensors: [], sourcePins, actuators: acts });
+            }
+            
             renderTables();
+            silentSave();
+            resetRuleForm();
+        }
+
+        function resetRuleForm() {
+            document.getElementById('ruleName').value = '';
+            document.getElementById('ruleEnabled').checked = true;
+            document.getElementById('ruleCombine').value = 'and';
+            // Сбросить селекты актуаторов
+            document.querySelectorAll('#actuatorsList input').forEach(cb => cb.checked = false);
+            // Сбросить строки источников
+            currentSourceCount = 1;
+            document.getElementById('ruleCondType').value = 'sensor';
+            updateRuleSource();
+            // Скролл к таблице правил
+            scrollToRules();
+        }
+
+        function scrollToRules() {
+            const rulesTable = document.getElementById('rulesTable');
+            if (rulesTable) rulesTable.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        async function silentSave() {
+            const config = {
+                channels, rules, sensorNames,
+                deviceName: document.getElementById('deviceName').value.trim(),
+                serverUrl: document.getElementById('serverUrl').value.trim(),
+                period: parseInt(document.getElementById('periodSelect').value) || 60,
+                ssid: document.getElementById('wifiSsid').value.trim(),
+                pass: document.getElementById('wifiPass').value
+            };
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                if (!res.ok) console.warn('silentSave error:', await res.text());
+            } catch (e) { console.error(e); }
         }
 
         async function saveConfig() {

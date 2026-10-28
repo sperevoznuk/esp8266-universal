@@ -61,15 +61,19 @@ void handleGetConfig() {
     JsonArray rArr = doc.createNestedArray("rules");
     for (auto& r : g_config.rules) {
         JsonObject jr = rArr.createNestedObject();
-        jr["id"] = r.id; jr["enabled"] = r.enabled; jr["name"] = r.name;
-        JsonObject cond = jr.createNestedObject("cond");
-        cond["type"] = r.cond.type;
-        if (r.cond.type == "sensor") {
-            cond["rom"] = r.cond.rom;
-            cond["target"] = r.target;
-            cond["hysteresis"] = r.hysteresis;
+        jr["id"] = r.id; jr["enabled"] = r.enabled; jr["name"] = r.name; jr["condType"] = r.condType; jr["combine"] = r.combine;
+        if (r.condType == "sensor") {
+            JsonArray sensArr = jr.createNestedArray("sensors");
+            for (auto& sc : r.sensors) {
+                JsonObject s = sensArr.createNestedObject();
+                s["rom"] = sc.rom;
+                s["target"] = sc.target;
+                s["hysteresis"] = sc.hysteresis;
+                s["mode"] = sc.mode;
+            }
         } else {
-            cond["pin"] = r.cond.pin;
+            JsonArray pArr = jr.createNestedArray("sourcePins");
+            for (uint8_t pin : r.sourcePins) pArr.add(pin);
         }
         JsonArray acts = jr.createNestedArray("actuators");
         for (uint8_t a : r.actuators) acts.add(a);
@@ -106,19 +110,42 @@ bool validateConfig(const DynamicJsonDocument& doc) {
     std::map<int, std::vector<int>> graph;
     
     for (JsonVariantConst r : rArr) {
-        if (r["cond"]["type"] == "relay") {
-            int src = r["cond"]["pin"];
-            JsonArrayConst acts = r["actuators"];
-            for (JsonVariantConst act : acts) {
-                int dst = act;
-                // Проверяем, что dst - это существующее реле
-                bool isRelay = false;
-                for (JsonVariantConst c : chArr) {
-                    if (c["pin"] == dst && c["type"] == "relay") isRelay = true;
+        String ctype = r["condType"].as<String>();
+        if (ctype.isEmpty()) ctype = r["cond"]["type"].as<String>(); // совместимость
+        
+        // Проверка sensor-правил: нужен хотя бы 1 датчик, макс 3
+        if (ctype == "sensor") {
+            JsonArrayConst sArr = r["sensors"];
+            if (sArr.size() == 0 || sArr.size() > 3) return false;
+        }
+        
+        // Проверка button/relay: 1-3 источника
+        if (ctype == "button" || ctype == "relay") {
+            JsonArrayConst pArr = r["sourcePins"];
+            if (pArr.size() == 0 || pArr.size() > 3) return false;
+        }
+        
+        if (ctype == "relay") {
+            // Определяем список source-пинов (поддержка старого формата cond.pin)
+            std::vector<int> relaySources;
+            JsonArrayConst pArr = r["sourcePins"];
+            if (pArr.size() > 0) {
+                for (JsonVariantConst v : pArr) relaySources.push_back(v.as<int>());
+            } else {
+                int oldPin = r["cond"]["pin"];
+                if (oldPin) relaySources.push_back(oldPin);
+            }
+            for (int src : relaySources) {
+                JsonArrayConst acts = r["actuators"];
+                for (JsonVariantConst act : acts) {
+                    int dst = act;
+                    bool isRelay = false;
+                    for (JsonVariantConst c : chArr) {
+                        if (c["pin"] == dst && c["type"] == "relay") isRelay = true;
+                    }
+                    if (!isRelay) return false;
+                    graph[src].push_back(dst);
                 }
-                if (!isRelay) return false;
-                
-                graph[src].push_back(dst);
             }
         }
     }
@@ -155,6 +182,18 @@ void handleSaveConfig() {
     }
 
     // Если валидация прошла, сохраняем
+    
+    // Сохраняем старые состояния enabled для детекции выключений правил
+    std::map<String, bool> oldEnabled;
+    for (const auto& old : g_config.rules) {
+        oldEnabled[old.id] = old.enabled;
+    }
+    // И старые актуаторы — чтобы знать, какие реле выключать
+    std::map<String, std::vector<uint8_t>> oldActuators;
+    for (const auto& old : g_config.rules) {
+        oldActuators[old.id] = old.actuators;
+    }
+    
     g_config.channels.clear();
     g_config.rules.clear();
     
@@ -170,16 +209,56 @@ void handleSaveConfig() {
     for (JsonVariantConst r : doc["rules"].as<JsonArrayConst>()) {
         Rule rule;
         rule.id = r["id"].as<String>(); rule.enabled = r["enabled"]; rule.name = r["name"].as<String>();
-        rule.cond.type = r["cond"]["type"].as<String>();
-        if (rule.cond.type == "sensor") {
-            rule.cond.rom = r["cond"]["rom"].as<String>();
-            rule.target = r["cond"]["target"]; rule.hysteresis = r["cond"]["hysteresis"];
+        rule.condType = r["condType"].as<String>();
+        if (rule.condType.isEmpty()) rule.condType = r["cond"]["type"].as<String>();
+        rule.combine = r["combine"] | "and"; // совместимость
+        
+        if (rule.condType == "sensor") {
+            // Пробуем sensors массив; для совместимости — cond["rom"]
+            JsonArrayConst sArr = r["sensors"];
+            if (sArr.size() > 0) {
+                for (JsonVariantConst s : sArr) {
+                    SensorCondition sc;
+                    sc.rom = s["rom"].as<String>();
+                    sc.target = s["target"];
+                    sc.hysteresis = s["hysteresis"] | 0.5;
+                    sc.mode = s["mode"] | true;
+                    sc.active = false;
+                    rule.sensors.push_back(sc);
+                }
+            } else {
+                // Старый формат: один датчик
+                SensorCondition sc;
+                sc.rom = r["cond"]["rom"].as<String>();
+                sc.target = r["cond"]["target"] | r["target"] | 0.0;
+                sc.hysteresis = r["cond"]["hysteresis"] | r["hysteresis"] | 0.5;
+                sc.mode = true;
+                sc.active = false;
+                rule.sensors.push_back(sc);
+            }
         } else {
-            rule.cond.pin = r["cond"]["pin"];
+            JsonArrayConst pArr = r["sourcePins"];
+            if (pArr.size() > 0) {
+                for (JsonVariantConst v : pArr) rule.sourcePins.push_back(v.as<uint8_t>());
+            } else {
+                // Старый формат: один пин из cond
+                rule.sourcePins.push_back(r["cond"]["pin"].as<uint8_t>());
+            }
         }
         JsonArrayConst acts = r["actuators"];
         for (JsonVariantConst a : acts) rule.actuators.push_back(a);
+        rule.prevEnabled = rule.enabled;
         g_config.rules.push_back(rule);
+    }
+    
+    // Детекция выключения правил: если правило было включено, а стало выключено — выключить его актуаторы
+    for (const auto& r : g_config.rules) {
+        auto it = oldEnabled.find(r.id);
+        if (it != oldEnabled.end() && it->second && !r.enabled) {
+            for (uint8_t pin : r.actuators) {
+                channels::setRelay(pin, false);
+            }
+        }
     }
     
     g_config.sensorNames.clear();

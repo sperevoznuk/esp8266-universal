@@ -38,13 +38,22 @@ namespace storage {
             jr["id"] = r.id;
             jr["enabled"] = r.enabled;
             jr["name"] = r.name;
-            jr["target"] = r.target;
-            jr["hysteresis"] = r.hysteresis;
+            jr["condType"] = r.condType;
+            jr["combine"] = r.combine;
             
-            JsonObject cond = jr.createNestedObject("cond");
-            cond["type"] = r.cond.type;
-            if (r.cond.type == "sensor") cond["rom"] = r.cond.rom;
-            else cond["pin"] = r.cond.pin;
+            if (r.condType == "sensor") {
+                JsonArray sensArr = jr.createNestedArray("sensors");
+                for (const auto& sc : r.sensors) {
+                    JsonObject s = sensArr.createNestedObject();
+                    s["rom"] = sc.rom;
+                    s["target"] = sc.target;
+                    s["hysteresis"] = sc.hysteresis;
+                    s["mode"] = sc.mode;
+                }
+            } else {
+                JsonArray pArr = jr.createNestedArray("sourcePins");
+                for (uint8_t pin : r.sourcePins) pArr.add(pin);
+            }
             
             JsonArray acts = jr.createNestedArray("actuators");
             for (uint8_t pin : r.actuators) acts.add(pin);
@@ -104,16 +113,46 @@ namespace storage {
             r.id = jr["id"].as<String>();
             r.enabled = jr["enabled"] | true;
             r.name = jr["name"] | "";
-            r.target = jr["target"] | 0.0;
-            r.hysteresis = jr["hysteresis"] | 0.5;
+            r.condType = jr["condType"] | jr["cond"]["type"].as<String>(); // cond["type"] для совместимости
+            r.combine = jr["combine"] | "and";
             
-            r.cond.type = jr["cond"]["type"].as<String>();
-            if (r.cond.type == "sensor") r.cond.rom = jr["cond"]["rom"].as<String>();
-            else r.cond.pin = jr["cond"]["pin"].as<uint8_t>();
+            if (r.condType == "sensor") {
+                // Пробуем sensors массив, для совместимости — cond["rom"]
+                if (jr.containsKey("sensors")) {
+                    for (JsonObject s : jr["sensors"].as<JsonArray>()) {
+                        SensorCondition sc;
+                        sc.rom = s["rom"].as<String>();
+                        sc.target = s["target"] | 0.0;
+                        sc.hysteresis = s["hysteresis"] | 0.5;
+                        sc.mode = s["mode"] | true;
+                        sc.active = false;
+                        r.sensors.push_back(sc);
+                    }
+                } else if (jr["cond"]["rom"].is<String>()) {
+                    // Старый формат: один датчик из cond.rom + target/hysteresis из корня
+                    SensorCondition sc;
+                    sc.rom = jr["cond"]["rom"].as<String>();
+                    sc.target = jr["target"] | 0.0;
+                    sc.hysteresis = jr["hysteresis"] | 0.5;
+                    sc.mode = true;
+                    sc.active = false;
+                    r.sensors.push_back(sc);
+                }
+            } else {
+                // Пробуем sourcePins массив, для совместимости — cond["pin"]
+                if (jr.containsKey("sourcePins")) {
+                    for (JsonVariant v : jr["sourcePins"].as<JsonArray>()) {
+                        r.sourcePins.push_back(v.as<uint8_t>());
+                    }
+                } else if (jr["cond"]["pin"].is<uint8_t>()) {
+                    r.sourcePins.push_back(jr["cond"]["pin"].as<uint8_t>());
+                }
+            }
             
             for (JsonVariant v : jr["actuators"].as<JsonArray>()) {
                 r.actuators.push_back(v.as<uint8_t>());
             }
+            r.prevEnabled = r.enabled;
             g_config.rules.push_back(r);
         }
 
