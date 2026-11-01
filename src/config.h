@@ -50,7 +50,8 @@ struct SensorNameEntry {
 struct Config {
     String deviceName;
     String serverUrl;
-    uint16_t period = 60; // период отправки телеметрии в секундах
+    uint16_t period = 0; // 0 = ручной режим (автоотправка отключена), иначе период в секундах
+    uint32_t configVersion = 0;
     std::vector<Channel> channels; 
     std::vector<Rule> rules;
     std::vector<SensorNameEntry> sensorNames;

@@ -16,6 +16,7 @@ namespace storage {
         doc["deviceName"] = g_config.deviceName;
         doc["serverUrl"] = g_config.serverUrl;
         doc["period"] = g_config.period;
+        doc["configVersion"] = ++g_config.configVersion;
         
         JsonArray channelsArray = doc.createNestedArray("channels");
         for (const auto& ch : g_config.channels) {
@@ -96,7 +97,8 @@ namespace storage {
 
         g_config.deviceName = doc["deviceName"] | "";
         g_config.serverUrl = doc["serverUrl"] | "";
-        g_config.period = doc["period"] | 60;
+        g_config.period = doc["period"] | 0;
+        g_config.configVersion = doc["configVersion"] | 0;
         
         g_config.channels.clear();
         for (JsonObject c : doc["channels"].as<JsonArray>()) {

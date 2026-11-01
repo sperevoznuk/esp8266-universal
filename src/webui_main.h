@@ -209,9 +209,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 </div>
                 <div class="row">
                     <div class="col"><label>Период отправки</label><select id="periodSelect">
+                        <option value="0">Вручную</option>
                         <option value="15">15 сек</option>
                         <option value="30">30 сек</option>
-                        <option value="60" selected>1 мин</option>
+                        <option value="60">1 мин</option>
                         <option value="300">5 мин</option>
                     </select></div>
                 </div>
@@ -221,7 +222,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                         <textarea id="examplePayload" rows="8" readonly></textarea>
                     </div>
                 </div>
-                <button onclick="saveTelemetrySettings()" style="background:#17a2b8;width:100%;">💾 Сохранить телеметрию</button>
+                <div class="row">
+                    <div class="col" style="display:flex;gap:10px;">
+                        <button onclick="saveTelemetrySettings()" style="background:#17a2b8;flex:1;">Сохранить телеметрию</button>
+                        <button onclick="testTelemetry()" style="background:#007bff;flex:1;">Проверить</button>
+                    </div>
+                </div>
+                <div id="telemetryLog" style="background:#f8f9fa; padding:10px; border-radius:5px; font-size:12px; font-family:monospace; max-height:200px; overflow-y:auto; margin-top:10px; border:1px solid #ddd; color:#333;"></div>
             </div>
         </div>
         <div id="tabConfig" class="tab-content">
@@ -427,7 +434,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             sensorNames = data.sensorNames || [];
             if (data.deviceName) { document.getElementById('deviceName').value = data.deviceName; document.getElementById('deviceNameDisplay').textContent = '— ' + data.deviceName; }
             if (data.serverUrl) document.getElementById('serverUrl').value = data.serverUrl;
-            if (data.period) document.getElementById('periodSelect').value = data.period;
+            if (data.period !== undefined) document.getElementById('periodSelect').value = data.period;
             if (data.ssid) { wifiSsid = data.ssid; document.getElementById('wifiSsid').value = data.ssid; }
             if (data.pass) { wifiPass = data.pass; document.getElementById('wifiPass').value = data.pass; }
             renderTables();
@@ -435,34 +442,60 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             updateExamplePayload();
         }
 
-        // Генерация примера отправляемых данных (телеметрия)
+        // Генерация примера отправляемых данных (телеметрия) — новый формат
         function updateExamplePayload() {
-            // sensorValues — все "датчики" (реле, кнопки, темп. датчики)
-            const sensorValues = [];
-            // Реле
-            channels.filter(c => c.type === 'relay').forEach(c => {
-                sensorValues.push({ name: c.name || pinNames[c.pin] || c.pin, value: false, type: 'relay' });
+            const sensorList = [];
+            
+            // Каналы: relay/button → id = имя или "Dx", value = 1/0
+            channels.filter(c => c.type !== 'sensor').forEach(c => {
+                const id = pinNames[c.pin] || 'D' + c.pin;
+                sensorList.push({ id, value: 0 });
             });
-            // Кнопки
-            channels.filter(c => c.type === 'button').forEach(c => {
-                sensorValues.push({ name: c.name || pinNames[c.pin] || c.pin, value: false, type: 'button' });
-            });
-            // Температурные датчики (каждый = отдельный элемент)
+            
+            // Температурные датчики (по ROM из availableSensors)
+            // Берем из sensorNames (если имя задано) или просто ROM
             availableSensors.forEach(s => {
-                const sn = getSensorName(s.rom) || s.rom;
-                sensorValues.push({ name: sn, value: s.t, type: 'temperature' });
+                const sn = sensorNames.find(n => n.rom === s.rom);
+                sensorList.push({ id: sn ? sn.rom : s.rom, value: (parseFloat(s.t) || 0).toFixed(2) });
             });
 
             const payload = {
-                sensors: sensorValues,
+                sensors: sensorList,
                 rules: rules.map(r => ({
                     id: r.id,
-                    name: r.name || '',
-                    enabled: r.enabled,
-                    triggered: r.active || false
+                    enabled: r.enabled ? 1 : 0,
+                    triggered: (r.active || false) ? 1 : 0
                 }))
             };
             document.getElementById('examplePayload').value = JSON.stringify(payload, null, 2);
+        }
+
+        // Отправка тест
+        async function testTelemetry() {
+            const log = document.getElementById('telemetryLog');
+            try {
+                const res = await fetch('/api/telemetry/send', { method: 'POST' });
+                const data = await res.json();
+                const time = new Date().toLocaleTimeString();
+                const respText = data.response || '';
+                const short = respText.length <= 140;
+                const escaped = respText.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                const respHtml = short
+                    ? '<span style="font-size:11px;color:#666;display:block;">' + escaped + '</span>'
+                    : '<details style="margin-top:3px;"><summary style="cursor:pointer;font-size:11px;">Подробнее</summary><pre style="background:#e9ecef;padding:6px;border-radius:4px;font-size:11px;margin:4px 0 0 0;white-space:pre-wrap;word-break:break-all;">' + escaped + '</pre></details>';
+                if (data.status === 'ok') {
+                    log.innerHTML = '<div style="color:#28a745;margin-bottom:6px;">[' + time + '] HTTP ' + data.httpCode + ' — OK' + respHtml + '</div>' + log.innerHTML;
+                    showNotification('Телеметрия отправлена успешно');
+                } else {
+                    const errMsg = data.error || 'HTTP ' + (data.httpCode || '') + (data.response ? ': ' + data.response : '');
+                    log.innerHTML = '<div style="color:#dc3545;margin-bottom:6px;">[' + time + '] HTTP ' + (data.httpCode || '—') + ' — ' + errMsg + respHtml + '</div>' + log.innerHTML;
+                    showNotification('Ошибка: ' + errMsg);
+                }
+            } catch(e) {
+                const time = new Date().toLocaleTimeString();
+                log.innerHTML = '<div style="color:#dc3545;">[' + time + '] Ошибка соединения: ' + e.message + '</div>' + log.innerHTML;
+                showNotification('Ошибка соединения: ' + e.message);
+            }
         }
 
         // Загрузка датчиков для списков
@@ -851,7 +884,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 channels, rules, sensorNames,
                 deviceName: document.getElementById('deviceName').value.trim(),
                 serverUrl: document.getElementById('serverUrl').value.trim(),
-                period: parseInt(document.getElementById('periodSelect').value) || 60,
+                period: parseInt(document.getElementById('periodSelect').value) || 0,
                 ssid: document.getElementById('wifiSsid').value.trim(),
                 pass: document.getElementById('wifiPass').value
             };
@@ -872,7 +905,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 channels, rules, sensorNames,
                 deviceName: document.getElementById('deviceName').value.trim(),
                 serverUrl: document.getElementById('serverUrl').value.trim(),
-                period: parseInt(document.getElementById('periodSelect').value) || 60,
+                period: parseInt(document.getElementById('periodSelect').value) || 0,
                 ssid: document.getElementById('wifiSsid').value.trim(),
                 pass: document.getElementById('wifiPass').value
             };
@@ -893,7 +926,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 channels, rules, sensorNames,
                 deviceName: document.getElementById('deviceName').value.trim(),
                 serverUrl: document.getElementById('serverUrl').value.trim(),
-                period: parseInt(document.getElementById('periodSelect').value) || 60,
+                period: parseInt(document.getElementById('periodSelect').value) || 0,
                 ssid: document.getElementById('wifiSsid').value.trim(),
                 pass: document.getElementById('wifiPass').value
             };
@@ -965,7 +998,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                         sensorNames: config.sensorNames || [],
                         deviceName: config.deviceName || '',
                         serverUrl: config.serverUrl || '',
-                        period: config.period || 60,
+                        period: config.period || 0,
                         ssid: config.ssid || '',
                         pass: config.pass || ''
                     })
@@ -1041,7 +1074,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         window.onload = async () => {
             await loadSensors();
             await loadConfig();
-            setInterval(updateStatus, 2000);
+            setInterval(updateStatus, 4000);
         };
     </script>
 </body>

@@ -58,7 +58,7 @@ namespace sensors {
                         sprintf(romStr + (j * 2), "%02x", addr[j]);
                     }
                     if (rom == String(romStr)) {
-                        return b.dt->getTempC(addr);
+                        return round2(b.dt->getTempC(addr));
                     }
                 }
             }

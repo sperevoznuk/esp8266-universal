@@ -13,6 +13,7 @@
 #include "channels.h"
 #include "sensors.h"
 #include "logic.h" // Подключаем логику
+#include "telemetry.h"
 
 ESP8266WebServer server(80);
 
@@ -463,6 +464,7 @@ void setup() {
     server.on("/api/relay", HTTP_POST, handleApiRelay);
     server.on("/api/scan", handleScan);
     server.on("/api/restart", HTTP_POST, handleApiRestart);
+    server.on("/api/telemetry/send", HTTP_POST, telemetry::handleApiTestTelemetry);
     
     server.onNotFound([]() {
         if (wifiSetup::isConfigMode) {
@@ -486,6 +488,17 @@ void loop() {
     if (millis() - lastEval > 1000) {
         lastEval = millis();
         logic::evaluateRules();
+    }
+
+    // Автоматическая отправка телеметрии
+    static unsigned long lastTelemetry = 0;
+    uint16_t period = g_config.period;
+    if (period > 0 && WiFi.status() == WL_CONNECTED) {
+        unsigned long interval = (unsigned long)period * 1000UL;
+        if (millis() - lastTelemetry > interval) {
+            lastTelemetry = millis();
+            telemetry::sendTelemetry();
+        }
     }
 
     yield();
