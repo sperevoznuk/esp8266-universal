@@ -408,6 +408,12 @@ void handleApiRelay() {
     channels::setRelay(doc["pin"], doc["state"]);
     server.send(200, "application/json", "{\"status\":\"ok\"}");
 }
+void handleApiRestart() {
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
+    delay(500);
+    ESP.restart();
+}
+
 void handleScan() {
     int n = WiFi.scanComplete();
     if (n == WIFI_SCAN_FAILED) {
@@ -456,6 +462,7 @@ void setup() {
     server.on("/api/telemetry", HTTP_GET, handleApiTelemetry);
     server.on("/api/relay", HTTP_POST, handleApiRelay);
     server.on("/api/scan", handleScan);
+    server.on("/api/restart", HTTP_POST, handleApiRestart);
     
     server.onNotFound([]() {
         if (wifiSetup::isConfigMode) {

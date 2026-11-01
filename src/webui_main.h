@@ -63,6 +63,19 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         #actuatorsList label { display: block; padding: 4px 0; }
         .action-btns { display: flex; gap: 5px; flex-wrap: nowrap; }
         .action-btns button { flex: 1; min-width: 0; }
+        /* Toast-уведомления */
+        .toast-container { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 10px; width: 90%; max-width: 450px; pointer-events: none; }
+        .toast { background: #333; color: #fff; padding: 14px 18px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.25); font-size: 14px; line-height: 1.4; display: flex; align-items: center; gap: 12px; pointer-events: auto; animation: toastIn 0.3s ease; }
+        .toast.success { background: #28a745; }
+        .toast.info { background: #007bff; }
+        .toast.warning { background: #ffc107; color: #333; }
+        .toast .toast-msg { flex: 1; }
+        .toast .toast-btn { background: rgba(255,255,255,0.25); border: 1px solid rgba(255,255,255,0.4); color: inherit; padding: 6px 14px; border-radius: 5px; cursor: pointer; font-size: 13px; white-space: nowrap; transition: 0.2s; }
+        .toast .toast-btn:hover { background: rgba(255,255,255,0.4); }
+        .toast .toast-close { background: none; border: none; color: inherit; font-size: 18px; cursor: pointer; opacity: 0.6; padding: 0 4px; }
+        .toast .toast-close:hover { opacity: 1; }
+        @keyframes toastIn { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes toastOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-20px); } }
         @media (max-width: 600px) {
             .row { flex-direction: column; gap: 5px; }
             .row .col { width: 100%; }
@@ -184,6 +197,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 <div class="row">
                     <div class="col"><label>Пароль</label><input type="password" id="wifiPass" maxlength="64" placeholder="Пароль (пусто - открытая сеть)"></div>
                 </div>
+                <button onclick="saveWifiSettings()" style="background:#007bff;width:100%;">💾 Сохранить настройки сети</button>
             </div>
         </div>
         <div id="tabTelemetry" class="tab-content">
@@ -207,6 +221,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                         <textarea id="examplePayload" rows="8" readonly></textarea>
                     </div>
                 </div>
+                <button onclick="saveTelemetrySettings()" style="background:#17a2b8;width:100%;">💾 Сохранить телеметрию</button>
             </div>
         </div>
         <div id="tabConfig" class="tab-content">
@@ -226,11 +241,17 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                         <button onclick="uploadConfig()" style="background:#ffc107;color:#000;">📤 Загрузить и применить</button>
                     </div>
                 </div>
+                <div class="row">
+                    <div class="col">
+                        <label>Перезагрузка устройства</label>
+                        <button onclick="if(confirm('Перезагрузить устройство?')) rebootDevice()" style="background:#dc3545;">🔄 Перезагрузить устройство</button>
+                    </div>
+                </div>
                 <p style="font-size:12px;color:#999;margin-top:10px;">Функционал загрузки конфига будет доработан после тестирования.</p>
             </div>
         </div>
-        <button class="save" onclick="saveConfig()">Сохранить конфигурацию</button>
-    </div>
+        </div>
+    <div class="toast-container" id="toastContainer"></div>
 
     <script>
         const pinNames = {5:"D1", 4:"D2", 0:"D3", 2:"D4", 14:"D5", 12:"D6", 13:"D7"};
@@ -243,7 +264,81 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         let wifiSsid = '';
         let wifiPass = '';
 
-        // Переключение вкладок
+        // --- Уведомления (Toast) ---
+        function showNotification(msg, showRebootBtn) {
+            const container = document.getElementById('toastContainer');
+            
+            // Если уведомление требует перезагрузки — удаляем все предыдущие
+            if (showRebootBtn) {
+                container.innerHTML = '';
+            }
+            
+            const toast = document.createElement('div');
+            toast.className = 'toast info';
+            
+            let html = `<span class="toast-msg">${msg}</span>`;
+            if (showRebootBtn) {
+                html += `<button class="toast-btn" onclick="rebootDevice()">🔄 Перезагрузить</button>`;
+            }
+            html += `<button class="toast-close" onclick="dismissToast(this)">✕</button>`;
+            toast.innerHTML = html;
+            container.appendChild(toast);
+            
+            if (!showRebootBtn) {
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.style.animation = 'toastOut 0.3s ease';
+                        setTimeout(() => { if (toast.parentNode) toast.remove(); }, 300);
+                    }
+                }, 5000);
+            }
+        }
+
+        function dismissToast(btn) {
+            const toast = btn.closest('.toast');
+            if (toast) { toast.style.animation = 'toastOut 0.3s ease'; setTimeout(() => { if (toast.parentNode) toast.remove(); }, 300); }
+        }
+
+        // --- Фильтрация списка пинов (скрытие занятых) ---
+        function populatePinDropdown() {
+            const select = document.getElementById('newPin');
+            const usedPins = channels.map(c => c.pin);
+            // Если в режиме редактирования — исключаем текущий пин канала
+            if (editChannelIndex >= 0) {
+                const curPin = channels[editChannelIndex].pin;
+                const idx = usedPins.indexOf(curPin);
+                if (idx >= 0) usedPins.splice(idx, 1);
+            }
+            
+            // Удаляем статичные плейсхолдеры из предыдущих вызовов
+            const oldPh = document.getElementById('newPinPlaceholder');
+            if (oldPh) oldPh.remove();
+            
+            let anyVisible = false;
+            for (let opt of select.options) {
+                const val = parseInt(opt.value);
+                if (isNaN(val)) continue; // пропускаем нечисловые option
+                const isUsed = usedPins.includes(val);
+                opt.disabled = isUsed;
+                opt.style.display = isUsed ? 'none' : '';
+                // Убираем selected с занятых пинов
+                if (isUsed && opt.selected) opt.selected = false;
+                if (!isUsed) anyVisible = true;
+            }
+            
+            // Если ни один пин не доступен — показываем плейсхолдер
+            if (!anyVisible && editChannelIndex < 0) {
+                const ph = document.createElement('option');
+                ph.value = '';
+                ph.disabled = true;
+                ph.selected = true;
+                ph.textContent = '— Все пины заняты —';
+                ph.id = 'newPinPlaceholder';
+                select.insertBefore(ph, select.firstChild);
+            }
+        }
+
+        // --- Переключение вкладок ---
         function switchTab(btn, name) {
             document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
@@ -299,8 +394,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             if (!name) { alert('Введите имя датчика!'); return; }
             // Проверяем, нет ли уже такого ROM
             const existing = sensorNames.findIndex(sn => sn.rom === rom);
+            let action = 'добавлено';
             if (existing >= 0) {
                 sensorNames[existing].name = name;
+                action = 'обновлено';
             } else {
                 sensorNames.push({ rom, name });
             }
@@ -308,6 +405,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             populateSensorRomDropdown();
             renderTables();
             updateExamplePayload();
+            silentSave();
+            showNotification('Имя датчика ' + action);
         }
 
         function removeSensorName(i) {
@@ -315,6 +414,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             populateSensorRomDropdown();
             renderTables();
             updateExamplePayload();
+            silentSave();
+            showNotification('Имя датчика удалено');
         }
 
         // Загрузка конфига
@@ -330,6 +431,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             if (data.ssid) { wifiSsid = data.ssid; document.getElementById('wifiSsid').value = data.ssid; }
             if (data.pass) { wifiPass = data.pass; document.getElementById('wifiPass').value = data.pass; }
             renderTables();
+            populatePinDropdown();
             updateExamplePayload();
         }
 
@@ -420,6 +522,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             });
 
             updateRuleSource(); // Обновить выпадающие списки в форме
+            populatePinDropdown();
         }
 
         // Обновление полей формы в зависимости от типа условия
@@ -552,6 +655,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             document.getElementById('newPin').value = ch.pin;
             document.getElementById('newName').value = ch.name || '';
             document.getElementById('addChannelBtn').textContent = 'Обновить';
+            populatePinDropdown();
         }
 
         function addChannel() {
@@ -567,15 +671,19 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 editChannelIndex = -1;
                 document.getElementById('addChannelBtn').textContent = 'Добавить';
                 renderTables();
+                silentSave();
+                showNotification('Канал обновлён. Для применения изменений нужна перезагрузка.', true);
                 return;
             }
             
-            if (channels.some(c => c.pin === pin)) { alert("Пин занят!"); return; }
+            if (channels.some(c => c.pin === pin)) { alert('Пин занят!'); return; }
             channels.push({ type, pin, name });
             renderTables();
+            silentSave();
+            showNotification('Канал «' + name + '» добавлен. Для инициализации пина нужна перезагрузка.', true);
         }
 
-        function removeChannel(i) { if (confirm('Удалить канал?')) { channels.splice(i, 1); renderTables(); } }
+        function removeChannel(i) { if (confirm('Удалить канал?')) { channels.splice(i, 1); renderTables(); silentSave(); showNotification('Канал удалён. Для применения нужна перезагрузка.', true); } }
         
         function toggleRule(i) {
             rules[i].enabled = !rules[i].enabled;
@@ -583,7 +691,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             silentSave();
         }
         
-        function removeRule(i) { if (confirm('Удалить правило?')) { rules.splice(i, 1); renderTables(); } }
+        function removeRule(i) { if (confirm('Удалить правило?')) { rules.splice(i, 1); renderTables(); silentSave(); showNotification('Правило удалено'); } }
 
         function editRule(i) {
             editRuleIndex = i;
@@ -678,6 +786,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     editRuleIndex = -1;
                     document.getElementById('addRuleBtn').textContent = 'Добавить правило';
                     renderTables(); silentSave(); resetRuleForm();
+                    showNotification('Правило обновлено');
                     return;
                 }
                 
@@ -704,6 +813,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     editRuleIndex = -1;
                     document.getElementById('addRuleBtn').textContent = 'Добавить правило';
                     renderTables(); silentSave(); resetRuleForm();
+                    showNotification('Правило обновлено');
                     return;
                 }
                 
@@ -714,6 +824,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             renderTables();
             silentSave();
             resetRuleForm();
+            showNotification('Правило «' + name + '» сохранено');
         }
 
         function resetRuleForm() {
@@ -754,25 +865,76 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             } catch (e) { console.error(e); }
         }
 
-        async function saveConfig() {
+        // --- Сохранение настроек Wi-Fi (с подтверждением) ---
+        async function saveWifiSettings() {
+            if (!confirm('Сохранение настроек сети вызовет перезагрузку устройства. Продолжить?')) return;
             const config = {
-                channels,
-                rules,
-                sensorNames,
+                channels, rules, sensorNames,
                 deviceName: document.getElementById('deviceName').value.trim(),
                 serverUrl: document.getElementById('serverUrl').value.trim(),
                 period: parseInt(document.getElementById('periodSelect').value) || 60,
                 ssid: document.getElementById('wifiSsid').value.trim(),
                 pass: document.getElementById('wifiPass').value
             };
-            const res = await fetch('/api/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(config)
-            });
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                if (res.ok) showNotification('Настройки сети сохранены. Перезагрузка...', true);
+                else alert('Ошибка: ' + await res.text());
+            } catch (e) { console.error(e); }
+        }
+
+        // --- Сохранение настроек телеметрии (без подтверждения) ---
+        async function saveTelemetrySettings() {
+            const config = {
+                channels, rules, sensorNames,
+                deviceName: document.getElementById('deviceName').value.trim(),
+                serverUrl: document.getElementById('serverUrl').value.trim(),
+                period: parseInt(document.getElementById('periodSelect').value) || 60,
+                ssid: document.getElementById('wifiSsid').value.trim(),
+                pass: document.getElementById('wifiPass').value
+            };
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                if (res.ok) showNotification('Настройки телеметрии сохранены');
+                else alert('Ошибка: ' + await res.text());
+            } catch (e) { console.error(e); }
+        }
+
+        // --- Перезагрузка устройства с таймером ---
+        async function rebootDevice() {
+            try {
+                await fetch('/api/restart', { method: 'POST' });
+            } catch (e) { /* Игнорируем — сервер уже перезагружается */ }
             
-            if (res.ok) alert("Сохранено! Перезагрузка...");
-            else alert("Ошибка валидации: " + await res.text());
+            // Очищаем все уведомления
+            const container = document.getElementById('toastContainer');
+            container.innerHTML = '';
+            
+            // Показываем таймер обратного отсчёта (не пропадает)
+            const toast = document.createElement('div');
+            toast.className = 'toast warning';
+            toast.id = 'rebootToast';
+            toast.innerHTML = '<span class="toast-msg">⏳ Перезагрузка... <b id="rebootCountdown">15</b> сек</span>';
+            container.appendChild(toast);
+            
+            let countdown = 15;
+            const interval = setInterval(() => {
+                countdown--;
+                const el = document.getElementById('rebootCountdown');
+                if (el) el.textContent = countdown;
+                if (countdown <= 0) {
+                    clearInterval(interval);
+                    location.reload();
+                }
+            }, 1000);
         }
 
         async function downloadConfig() {
