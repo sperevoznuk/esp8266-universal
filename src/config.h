@@ -45,6 +45,7 @@ struct Rule {
 struct SensorNameEntry {
     String rom;
     String name;
+    float offset = 0.0; 
 };
 
 struct Config {

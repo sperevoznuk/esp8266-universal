@@ -135,13 +135,14 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             <div class="tab-desc">Задайте удобные имена для температурных датчиков (DS18B20). Имена будут отображаться во всех разделах, а в блоке состояния — имя и код датчика.</div>
             <div class="table-wrap">
             <table id="sensorNamesTable">
-                <thead><tr><th>ROM-код датчика</th><th>Имя</th><th style="width:80px">Действие</th></tr></thead>
+                <thead><tr><th>ROM-код датчика</th><th>Имя</th><th>Смещение (°C)</th><th style="width:80px">Действие</th></tr></thead>
                 <tbody></tbody>
             </table>
             </div>
             <div class="row" style="margin-top:15px;">
                 <div class="col"><select id="newSensorRom"></select></div>
                 <div class="col"><input type="text" id="newSensorName" placeholder="Имя датчика" maxlength="30"></div>
+                <div class="col"><input type="number" id="newSensorOffset" placeholder="Смещение (напр. 4.0)" step="0.1" value="0.0" style="width:100%;"></div>
                 <button onclick="addSensorName()" style="width:120px;margin-bottom:10px;">Добавить</button>
             </div>
         </div>
@@ -382,33 +383,40 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             const tbody = document.querySelector('#sensorNamesTable tbody');
             tbody.innerHTML = '';
             sensorNames.forEach((sn, i) => {
+                const offsetStr = sn.offset > 0 ? '+' + Number(sn.offset).toFixed(1) : Number(sn.offset).toFixed(1);
                 tbody.innerHTML += `<tr>
                     <td style="font-family:monospace;font-size:12px;">${sn.rom}</td>
                     <td>${sn.name}</td>
+                    <td><b>${offsetStr}</b></td>
                     <td><button class="del" onclick="removeSensorName(${i})">Удалить</button></td>
                 </tr>`;
             });
             if (sensorNames.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#888;">Имена не заданы</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#888;">Имена не заданы</td></tr>';
             }
         }
 
         // Добавить/обновить имя датчика
-        function addSensorName() {
+            function addSensorName() {
             const rom = document.getElementById('newSensorRom').value;
             const name = document.getElementById('newSensorName').value.trim();
+            const offset = parseFloat(document.getElementById('newSensorOffset').value) || 0.0; // <-- Считываем offset
+            
             if (!rom) { alert('Нет доступных датчиков!'); return; }
             if (!name) { alert('Введите имя датчика!'); return; }
-            // Проверяем, нет ли уже такого ROM
+            
             const existing = sensorNames.findIndex(sn => sn.rom === rom);
             let action = 'добавлено';
             if (existing >= 0) {
                 sensorNames[existing].name = name;
+                sensorNames[existing].offset = offset;  
                 action = 'обновлено';
             } else {
-                sensorNames.push({ rom, name });
+                sensorNames.push({ rom, name, offset });  
             }
+            
             document.getElementById('newSensorName').value = '';
+            document.getElementById('newSensorOffset').value = '0.0';  
             populateSensorRomDropdown();
             renderTables();
             updateExamplePayload();

@@ -31,6 +31,7 @@ namespace storage {
             JsonObject o = snArr.createNestedObject();
             o["rom"] = sn.rom;
             o["name"] = sn.name;
+            o["offset"] = sn.offset;
         }
 
         JsonArray rulesArray = doc.createNestedArray("rules");
@@ -163,6 +164,7 @@ namespace storage {
             SensorNameEntry e;
             e.rom = sn["rom"].as<String>();
             e.name = sn["name"] | "";
+            e.offset = sn["offset"] | 0.0;
             g_config.sensorNames.push_back(e);
         }
 
