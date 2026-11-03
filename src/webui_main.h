@@ -169,8 +169,14 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 <tbody></tbody>
             </table>
             </div>
-            <div class="form-box">
-                <h3>Добавить правило</h3>
+            <div class="row" style="margin-top:15px;">
+                <button id="rulesAddBtn" onclick="openRuleForm()" style="background:#28a745;width:auto;padding:10px 15px;">➕ Добавить правило</button>
+            </div>
+            <div id="ruleForm" class="form-box" style="display:none;margin-top:10px;">
+                <div class="row" style="margin:0 0 10px 0;align-items:center;justify-content:space-between;">
+                    <h3 id="ruleFormTitle" style="margin:0;font-size:15px;color:#333;">Добавить правило</h3>
+                    <button onclick="closeRuleForm()" style="background:#6c757d;width:auto;padding:8px 12px;margin:0;">✕ Отмена</button>
+                </div>
                 <div class="row">
                     <div class="col"><input type="text" id="ruleName" placeholder="Имя правила (до 25 симв.)" maxlength="25"></div>
                     <div class="col"><select id="ruleCondType" onchange="updateRuleSource()">
@@ -829,7 +835,29 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         
         function removeRule(i) { if (confirm('Удалить правило?')) { rules.splice(i, 1); renderTables(); silentSave(); showNotification('Правило удалено'); } }
 
+        // --- Правила: скрытая форма добавления/редактирования ---
+
+        // Открыть форму в режиме добавления (editRule открывает её в режиме редактирования)
+        function openRuleForm() {
+            const form = document.getElementById('ruleForm');
+            if (form) form.style.display = 'block';
+            const addBtn = document.getElementById('rulesAddBtn');
+            if (addBtn) addBtn.style.display = 'none';
+            document.getElementById('ruleFormTitle').textContent = 'Добавить правило';
+            document.getElementById('addRuleBtn').textContent = 'Добавить правило';
+        }
+
+        // Скрыть форму и сбросить её состояние (кнопка «Отмена»)
+        function closeRuleForm() {
+            editRuleIndex = -1;
+            resetRuleForm();
+        }
+
         function editRule(i) {
+            // Открыть форму в режиме редактирования
+            document.getElementById('ruleForm').style.display = 'block';
+            document.getElementById('rulesAddBtn').style.display = 'none';
+            document.getElementById('ruleFormTitle').textContent = 'Изменение правила';
             editRuleIndex = i;
             const r = rules[i];
             document.getElementById('ruleName').value = r.name || '';
@@ -975,6 +1003,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             updateRuleSource();
             // Скролл к таблице правил
             scrollToRules();
+            // Скрыть форму и вернуть кнопку «Добавить правило»
+            const form = document.getElementById('ruleForm');
+            if (form) form.style.display = 'none';
+            const addBtn = document.getElementById('rulesAddBtn');
+            if (addBtn) addBtn.style.display = 'block';
         }
 
         function scrollToRules() {
