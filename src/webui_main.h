@@ -43,6 +43,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         .active-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #ccc; }
         .active-dot.on { background: #28a745; box-shadow: 0 0 5px #28a745; }
         .form-box { background: #f9f9f9; padding: 15px; border-radius: 5px; border: 1px solid #ddd; margin-top: 15px; }
+        .fw-status { display: none; margin-top: 12px; padding: 12px; border-radius: 6px; font-size: 14px; text-align: center; }
+        .fw-status.uploading { display: block; background: #e7f0ff; color: #0056b3; border: 1px solid #a8c8ff; }
+        .fw-status.ok { display: block; background: #e6f9ec; color: #1a7f37; border: 1px solid #9ce0b0; }
+        .fw-status.error { display: block; background: #ffe9e9; color: #c0392b; border: 1px solid #f0b4b4; }
         .tabs { display: flex; gap: 0; margin-bottom: 0; overflow-x: auto; overflow-y: hidden; white-space: nowrap; flex-wrap: nowrap; }
         .tabs button { flex: 0 0 auto; padding: 10px 12px; background: #e9ecef; border: none; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 13px; color: #555; transition: 0.2s; }
         .tabs button.active { background: white; color: #007bff; font-weight: normal; }
@@ -103,6 +107,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             <button onclick="switchTab(this, 'wifi')">Wi-Fi</button>
             <button onclick="switchTab(this, 'telemetry')">Телеметрия</button>
             <button onclick="switchTab(this, 'config')">Конфиг</button>
+            <button onclick="switchTab(this, 'firmware')">Прошивка</button>
         </div>
         <div id="tabChannels" class="tab-content active">
             <div class="tab-desc">Управление пинами: добавьте реле для управления, кнопки для ввода и датчики DS18B20 для измерения температуры.</div>
@@ -256,6 +261,28 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     </div>
                 </div>
                 <p style="font-size:12px;color:#999;margin-top:10px;">Функционал загрузки конфига будет доработан после тестирования.</p>
+            </div>
+        </div>
+        <div id="tabFirmware" class="tab-content">
+            <div class="tab-desc">Обновление прошивки устройства загрузкой файла (.bin). Во время обновления не выключайте питание и не закрывайте страницу.</div>
+            <div class="form-box">
+                <h3>Обновление прошивки</h3>
+                <div class="row">
+                    <div class="col"><label>Текущая версия прошивки</label><input type="text" id="fwVersion" value="—" readonly style="background:#f0f0f0;"></div>
+                </div>
+                <div class="row">
+                    <div class="col">
+                        <label>Файл прошивки</label>
+                        <input type="file" id="firmwareFileInput" accept=".bin">
+                        <p style="font-size:12px;color:#888;margin:5px 0 0 0;">Файл собирается PlatformIO: <code>.pio/build/esp8266/firmware.bin</code></p>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col">
+                        <button id="fwUploadBtn" onclick="uploadFirmware()" style="background:#28a745;width:100%;">📤 Обновить прошивку</button>
+                    </div>
+                </div>
+                <div id="fwStatus" class="fw-status"></div>
             </div>
         </div>
         </div>
@@ -949,23 +976,16 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             } catch (e) { console.error(e); }
         }
 
-        // --- Перезагрузка устройства с таймером ---
-        async function rebootDevice() {
-            try {
-                await fetch('/api/restart', { method: 'POST' });
-            } catch (e) { /* Игнорируем — сервер уже перезагружается */ }
-            
-            // Очищаем все уведомления
+        // --- Обратный отсчёт до перезагрузки (общий таймер) ---
+        function showRebootCountdown(msg) {
             const container = document.getElementById('toastContainer');
             container.innerHTML = '';
-            
-            // Показываем таймер обратного отсчёта (не пропадает)
+
             const toast = document.createElement('div');
             toast.className = 'toast warning';
-            toast.id = 'rebootToast';
-            toast.innerHTML = '<span class="toast-msg">⏳ Перезагрузка... <b id="rebootCountdown">15</b> сек</span>';
+            toast.innerHTML = '<span class="toast-msg">' + msg + ' <b id="rebootCountdown">15</b> сек</span>';
             container.appendChild(toast);
-            
+
             let countdown = 15;
             const interval = setInterval(() => {
                 countdown--;
@@ -976,6 +996,63 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     location.reload();
                 }
             }, 1000);
+        }
+
+        // --- Перезагрузка устройства с таймером ---
+        async function rebootDevice() {
+            try {
+                await fetch('/api/restart', { method: 'POST' });
+            } catch (e) { /* Игнорируем — сервер уже перезагружается */ }
+            showRebootCountdown('⏳ Перезагрузка...');
+        }
+
+        // --- Обновление прошивки файлом ---
+        async function uploadFirmware() {
+            const input = document.getElementById('firmwareFileInput');
+            const file = input.files && input.files[0];
+            if (!file) { alert('Выберите файл прошивки (.bin)!'); return; }
+
+            const sizeMB = (file.size / 1048576).toFixed(2);
+            if (!confirm('Обновить прошивку файлом «' + file.name + '» (' + sizeMB + ' МБ)?\nУстройство будет перезагружено. Продолжить?')) return;
+
+            const btn = document.getElementById('fwUploadBtn');
+            const status = document.getElementById('fwStatus');
+            btn.disabled = true;
+            status.className = 'fw-status uploading';
+            status.textContent = '⏳ Загрузка... не закрывайте страницу и не отключайте питание';
+
+            const fd = new FormData();
+            fd.append('firmware', file, file.name);
+
+            try {
+                const res = await fetch('/update', { method: 'POST', body: fd });
+                const bodyText = await res.text();
+
+                // ESP8266HTTPUpdateServer отвечает 200 даже при ошибке — инспектируем текст ответа
+                if (bodyText.toLowerCase().indexOf('error') !== -1) {
+                    status.className = 'fw-status error';
+                    status.textContent = '❌ Ошибка обновления: ' + bodyText;
+                    btn.disabled = false;
+                    return;
+                }
+
+                // Успех: показан "Update Success! Rebooting..."
+                status.className = 'fw-status ok';
+                status.textContent = '✅ Прошивка установлена!';
+                showRebootCountdown('✅ Прошивка установлена! Перезагрузка...');
+            } catch (e) {
+                // Соединение оборвано — ESP закрыл коннект и начал перезагрузку (успех)
+                // или сетевая ошибка при загрузке
+                if (e instanceof TypeError) {
+                    status.className = 'fw-status ok';
+                    status.textContent = '✅ Прошивка загружена, устройство перезагружается...';
+                    showRebootCountdown('✅ Прошивка загружена! Перезагрузка...');
+                } else {
+                    status.className = 'fw-status error';
+                    status.textContent = '❌ Ошибка сети: ' + e.message;
+                    btn.disabled = false;
+                }
+            }
         }
 
         async function downloadConfig() {
@@ -1022,6 +1099,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
+
+                // Версия прошивки (вкладка «Прошивка»)
+                if (data.fw) document.getElementById('fwVersion').value = data.fw;
 
                 // Обновляем флаги active в таблице правил (без полной перерисовки)
                 if (data.rules) {

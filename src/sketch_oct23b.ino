@@ -1,5 +1,6 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+#include <ESP8266HTTPUpdateServer.h>
 #include <LittleFS.h>
 #include <user_interface.h>
 #include <ArduinoJson.h>
@@ -16,6 +17,7 @@
 #include "telemetry.h"
 
 ESP8266WebServer server(80);
+ESP8266HTTPUpdateServer httpUpdater(true); // serial-лог процесса OTA-обновления
 
 // --- Обработчики страниц и API ---
 
@@ -86,6 +88,7 @@ void handleGetConfig() {
         JsonObject o = snArr.createNestedObject();
         o["rom"] = sn.rom;
         o["name"] = sn.name;
+        o["offset"] = sn.offset;
     }
     
     String out;
@@ -267,6 +270,7 @@ void handleSaveConfig() {
         SensorNameEntry e;
         e.rom = sn["rom"].as<String>();
         e.name = sn["name"].as<String>();
+        e.offset = sn["offset"] | 0.0; 
         g_config.sensorNames.push_back(e);
     }
 
@@ -304,6 +308,7 @@ void handleSaveConfig() {
 
 void handleApiStatus() {
     DynamicJsonDocument doc(2048);
+    doc["fw"] = FW_VERSION;
     
     // Реле
     JsonArray relays = doc.createNestedArray("relays");
@@ -465,6 +470,9 @@ void setup() {
     server.on("/api/scan", handleScan);
     server.on("/api/restart", HTTP_POST, handleApiRestart);
     server.on("/api/telemetry/send", HTTP_POST, telemetry::handleApiTestTelemetry);
+    
+    // OTA-обновление прошивки: GET /update — служебная форма, POST /update — загрузка файла
+    httpUpdater.setup(&server, "/update");
     
     server.onNotFound([]() {
         if (wifiSetup::isConfigMode) {
