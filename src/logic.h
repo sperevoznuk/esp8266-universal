@@ -3,6 +3,7 @@
 #include "channels.h"
 #include "sensors.h"
 #include "common.h"
+#include <time.h>
 
 namespace logic {
 
@@ -72,6 +73,16 @@ namespace logic {
                     if (!channels::getRelayState(pin)) return false;
                 }
                 return !r.sourcePins.empty();
+            }
+        }
+        else if (r.condType == "time") {
+            struct tm timeinfo;
+            if (!getLocalTime(&timeinfo)) return false;
+            int h = timeinfo.tm_hour;
+            if (r.timeFrom <= r.timeTo) {
+                return h >= r.timeFrom && h < r.timeTo;
+            } else {
+                return h >= r.timeFrom || h < r.timeTo;
             }
         }
         return false;

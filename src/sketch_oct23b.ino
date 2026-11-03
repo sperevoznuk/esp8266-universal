@@ -5,6 +5,7 @@
 #include <user_interface.h>
 #include <ArduinoJson.h>
 #include <map>
+#include <time.h>
 
 #include "config.h"
 #include "common.h"
@@ -74,6 +75,9 @@ void handleGetConfig() {
                 s["hysteresis"] = sc.hysteresis;
                 s["mode"] = sc.mode;
             }
+        } else if (r.condType == "time") {
+            jr["timeFrom"] = r.timeFrom;
+            jr["timeTo"] = r.timeTo;
         } else {
             JsonArray pArr = jr.createNestedArray("sourcePins");
             for (uint8_t pin : r.sourcePins) pArr.add(pin);
@@ -447,6 +451,8 @@ void setup() {
     channels::apply();
     sensors::begin();
     wifiSetup::begin(&server);
+    configTime(3 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+    logf("SNTP: часовой пояс +3 (МСК)");
 
     server.on("/", handleRoot);
     server.on("/api/config", HTTP_GET, handleGetConfig);

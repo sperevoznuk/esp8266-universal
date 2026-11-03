@@ -35,10 +35,12 @@ struct Rule {
     bool active;    // Вычисляется прошивкой (в JSON не сохраняется)
     bool prevEnabled = true; // Предыдущее состояние enabled (runtime, не сериализуется)
     String name;
-    String condType; // "sensor", "button", "relay"
+    String condType; // "sensor", "button", "relay", "time"
     String combine;  // "and" — все условия, "or" — любое условие
     std::vector<SensorCondition> sensors;   // 0-3 для type=="sensor"
     std::vector<uint8_t> sourcePins;        // 1-3 для type=="button" или "relay"
+    uint8_t timeFrom = 0;                   // час начала для type=="time" (0-23)
+    uint8_t timeTo = 23;                    // час окончания для type=="time" (0-23)
     std::vector<uint8_t> actuators; // Массив пинов реле
 };
 

@@ -182,6 +182,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                         <option value="sensor">Датчик(и)</option>
                         <option value="button">Кнопка</option>
                         <option value="relay">Реле</option>
+                        <option value="time">Время (диапазон)</option>
                     </select></div>
                 </div>
                 <div class="row">
@@ -651,6 +652,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                         const modeOp = s.mode ? '≤' : '≥';
                         return `${sname || s.rom} ${modeOp}${Number(s.target).toFixed(1)}°C (h:${Number(s.hysteresis).toFixed(1)})`;
                     }).join(combineLabel);
+                } else if (r.condType === 'time') {
+                    const from = r.timeFrom !== undefined ? r.timeFrom : 0;
+                    const to = r.timeTo !== undefined ? r.timeTo : 23;
+                    condStr = `\u23F0 ${String(from).padStart(2,'0')}:00 \u2013 ${String(to).padStart(2,'0')}:00`;
                 } else {
                     const typeLabel = r.condType === 'relay' ? 'Реле' : 'Кнопка';
                     const combineLabel = r.combine === 'or' ? ' ИЛИ ' : '; ';
@@ -693,7 +698,23 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         function renderSourceRows(savedValues) {
             const type = document.getElementById('ruleCondType').value;
             const container = document.getElementById('sourceRows');
-
+// Время: показываем селекты часов вместо строк источников
+            if (type === 'time') {
+                const hourOpts = Array.from({length:24}, (_,h) =>
+                    `<option value="${h}">${String(h).padStart(2,'0')}:00</option>`
+                ).join('');
+                container.innerHTML = `
+                    <div class="row">
+                        <div class="col" style="display:flex;gap:8px;align-items:center;">
+                            <label style="white-space:nowrap;">с</label>
+                            <select id="timeFrom" style="width:80px;">${hourOpts}</select>
+                            <label style="white-space:nowrap;">до</label>
+                            <select id="timeTo" style="width:80px;">${hourOpts}</select>
+                            <label style="white-space:nowrap;">ч</label>
+                        </div>
+                    </div>`;
+                return;
+            }
             // Сохраняем значения текущих строк (если не переданы через savedValues)
             const saved = savedValues || collectSourceRowValues();
             const isSensor = type === 'sensor';
@@ -757,6 +778,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         // Сбор значений строк из DOM (по currentSourceCount)
         function collectSourceRowValues() {
             const type = document.getElementById('ruleCondType').value;
+            if (type === 'time') return [];
             const isSensor = type === 'sensor';
             const saved = [];
             for (let i = 0; i < currentSourceCount; i++) {
@@ -875,7 +897,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             document.getElementById('ruleEnabled').checked = r.enabled;
 
             // Определяем количество строк по количеству источников правила
-            if ((r.condType || 'sensor') === 'sensor') {
+            if ((r.condType || 'sensor') === 'time') {
+                currentSourceCount = 0;
+            } else if ((r.condType || 'sensor') === 'sensor') {
                 const sensors = r.sensors || [];
                 currentSourceCount = Math.min(Math.max(sensors.length, 1), 3);
             } else {
@@ -888,7 +912,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             setTimeout(() => {
                 const type = r.condType || 'sensor';
                 const isSensor = type === 'sensor';
-                for (let i = 0; i < currentSourceCount; i++) {
+if (type === 'time') {
+                    const tf = document.getElementById('timeFrom');
+                    const tt = document.getElementById('timeTo');
+                    if (tf) tf.value = r.timeFrom !== undefined ? r.timeFrom : 0;
+                    if (tt) tt.value = r.timeTo !== undefined ? r.timeTo : 23;
+                }                for (let i = 0; i < currentSourceCount; i++) {
                     const sel = document.getElementById(`srcSel${i}`);
                     const sourceVal = isSensor ? (r.sensors || [])[i]?.rom : (r.sourcePins || [])[i];
                     if (sel && sourceVal !== undefined) {
@@ -965,6 +994,29 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 
                 const id = Math.random().toString(16).substr(2, 8);
                 rules.push({ id, name, enabled, condType: type, combine, sensors, sourcePins: [], actuators: acts });
+            } else if (type === 'time') {
+                const timeFrom = parseInt(document.getElementById('timeFrom').value) || 0;
+                const timeTo = parseInt(document.getElementById('timeTo').value) || 23;
+
+                if (editRuleIndex >= 0) {
+                    rules[editRuleIndex].name = name;
+                    rules[editRuleIndex].condType = type;
+                    rules[editRuleIndex].combine = '';
+                    rules[editRuleIndex].timeFrom = timeFrom;
+                    rules[editRuleIndex].timeTo = timeTo;
+                    rules[editRuleIndex].sensors = [];
+                    rules[editRuleIndex].sourcePins = [];
+                    rules[editRuleIndex].actuators = acts;
+                    rules[editRuleIndex].enabled = enabled;
+                    editRuleIndex = -1;
+                    document.getElementById('addRuleBtn').textContent = 'Добавить правило';
+                    renderTables(); silentSave(); resetRuleForm();
+                    showNotification('Правило обновлено');
+                    return;
+                }
+
+                const id = Math.random().toString(16).substr(2, 8);
+                rules.push({ id, name, enabled, condType: type, combine: '', timeFrom, timeTo, sensors: [], sourcePins: [], actuators: acts });
             } else {
                 // Собираем пины кнопок/реле
                 const sourcePins = [];

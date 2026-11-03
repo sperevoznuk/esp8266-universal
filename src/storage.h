@@ -52,6 +52,9 @@ namespace storage {
                     s["hysteresis"] = sc.hysteresis;
                     s["mode"] = sc.mode;
                 }
+            } else if (r.condType == "time") {
+                jr["timeFrom"] = r.timeFrom;
+                jr["timeTo"] = r.timeTo;
             } else {
                 JsonArray pArr = jr.createNestedArray("sourcePins");
                 for (uint8_t pin : r.sourcePins) pArr.add(pin);
@@ -141,6 +144,9 @@ namespace storage {
                     sc.active = false;
                     r.sensors.push_back(sc);
                 }
+            } else if (r.condType == "time") {
+                r.timeFrom = jr["timeFrom"] | 0;
+                r.timeTo = jr["timeTo"] | 23;
             } else {
                 // Пробуем sourcePins массив, для совместимости — cond["pin"]
                 if (jr.containsKey("sourcePins")) {
