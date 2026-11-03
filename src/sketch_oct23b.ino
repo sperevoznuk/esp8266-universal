@@ -368,27 +368,15 @@ void handleApiTelemetry() {
             o["type"] = "button";
         }
     }
-    // Температурные датчики — каждый отдельный элемент
-    for (auto& b : sensors::buses) {
-        b.dt->requestTemperatures();
-        int count = b.dt->getDeviceCount();
-        for (int i = 0; i < count; i++) {
-            DeviceAddress addr;
-            if (b.dt->getAddress(addr, i)) {
-                float temp = b.dt->getTempC(addr);
-                if (temp != DEVICE_DISCONNECTED_C) {
-                    char romStr[17];
-                    for (int j = 0; j < 8; j++) {
-                        sprintf(romStr + (j * 2), "%02x", addr[j]);
-                    }
-                    JsonObject o = sArr.createNestedObject();
-                    String rom = String(romStr);
-                    String sn = sensors::getNameByRom(rom);
-                    o["name"] = sn.length() > 0 ? sn : rom;
-                    o["value"] = round2(temp);
-                    o["type"] = "temperature";
-                }
-            }
+    // Температурные датчики — каждый отдельный элемент (из кэша опроса раз в 5 с)
+    for (const auto& kv : sensors::tempCache) {
+        float temp = kv.second;
+        if (temp != -127.0) {
+            JsonObject o = sArr.createNestedObject();
+            String sn = sensors::getNameByRom(kv.first);
+            o["name"] = sn.length() > 0 ? sn : kv.first;
+            o["value"] = temp;
+            o["type"] = "temperature";
         }
     }
     
@@ -490,6 +478,9 @@ void setup() {
 void loop() {
     wifiSetup::tick();
     server.handleClient();
+
+    // Неблокирующий опрос датчиков (конверсия раз в 5 с, чтение из кэша)
+    sensors::tick();
 
     // Вызов логики раз в 1 секунду
     static unsigned long lastEval = 0;

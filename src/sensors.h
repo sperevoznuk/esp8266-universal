@@ -2,6 +2,7 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <ArduinoJson.h>
+#include <map>
 #include "config.h"
 #include "common.h"
 
@@ -38,6 +39,75 @@ namespace sensors
 
     inline std::vector<SensorBus> buses;
 
+    // Кэш температуры: ROM -> температура (с учётом offset), -127 = недоступен
+    inline std::map<String, float> tempCache;
+
+    // Неблокирующий опрос: конверсия запускается раз в 5 с,
+    // результат читается через ~800 мс (12-бит DS18B20 ≈ 750 мс)
+    inline const unsigned long SENSOR_POLL_MS = 5000UL;
+    inline const unsigned long CONVERSION_WAIT_MS = 800UL;
+    inline unsigned long lastRequestAt = 0;
+    inline unsigned long conversionStartedAt = 0;
+    inline bool conversionPending = false;
+
+    // Запросить конверсию на всех шинах (возвращается сразу, без блокировки)
+    inline void requestConversion()
+    {
+        for (auto &b : buses)
+        {
+            b.dt->requestTemperatures();
+        }
+        conversionPending = true;
+        conversionStartedAt = millis();
+    }
+
+    // Прочитать результаты конверсии в tempCache
+    inline void updateCache()
+    {
+        tempCache.clear();
+        for (auto &b : buses)
+        {
+            int count = b.dt->getDeviceCount();
+            for (int i = 0; i < count; i++)
+            {
+                DeviceAddress addr;
+                if (b.dt->getAddress(addr, i))
+                {
+                    char romStr[17];
+                    for (int j = 0; j < 8; j++)
+                    {
+                        sprintf(romStr + (j * 2), "%02x", addr[j]);
+                    }
+                    String rom = String(romStr);
+                    float t = b.dt->getTempC(addr);
+                    if (t == DEVICE_DISCONNECTED_C)
+                        t = -127.0;
+                    else
+                        t = round2(t + getOffsetByRom(rom));
+                    tempCache[rom] = t;
+                }
+            }
+        }
+        conversionPending = false;
+        lastRequestAt = millis();
+    }
+
+    // Неблокирующий «движок»: вызывается каждый проход loop()
+    inline void tick()
+    {
+        unsigned long now = millis();
+        if (!conversionPending)
+        {
+            if (now - lastRequestAt >= SENSOR_POLL_MS)
+                requestConversion();
+        }
+        else
+        {
+            if (now - conversionStartedAt >= CONVERSION_WAIT_MS)
+                updateCache();
+        }
+    }
+
     // Инициализация шин датчиков (может быть несколько)
     inline void begin()
     {
@@ -58,21 +128,31 @@ namespace sensors
                     b.oneWire = new OneWire(ch.pin);
                     b.dt = new DallasTemperature(b.oneWire);
                     b.dt->begin();
+                    b.dt->setWaitForConversion(false); // асинхронная конверсия, без блокировки loop
                     buses.push_back(b);
                     logf("Шина DS18B20 инициализирована на пине %d", ch.pin);
                 }
             }
         }
+        if (!buses.empty())
+            requestConversion(); // первый опрос сразу после старта
     }
 
-    // Получить температуру по ROM-адресу
+    // Получить температуру по ROM-адресу (из кэша, без опроса шины)
     inline float getTempByRom(const String &rom)
+    {
+        auto it = tempCache.find(rom);
+        if (it == tempCache.end())
+            return -127.0; // Ещё не отчитался или не найден
+        return it->second;
+    }
+
+    // Чтение всех датчиков в JSON-массив (из кэша)
+    inline void readAll(JsonArray &arr)
     {
         for (auto &b : buses)
         {
-            b.dt->requestTemperatures();
             int count = b.dt->getDeviceCount();
-
             for (int i = 0; i < count; i++)
             {
                 DeviceAddress addr;
@@ -83,48 +163,14 @@ namespace sensors
                     {
                         sprintf(romStr + (j * 2), "%02x", addr[j]);
                     }
-                    if (rom == String(romStr))
-                    {
-                        float t = b.dt->getTempC(addr);
-                        if (t == DEVICE_DISCONNECTED_C)
-                            return -127.0;
-                        return round2(t + getOffsetByRom(rom));
-                    }
-                }
-            }
-        }
-        return -127.0; // Не найден
-    }
-
-    // Чтение всех датчиков в JSON-массив
-    inline void readAll(JsonArray &arr)
-    {
-        for (auto &b : buses)
-        {
-            b.dt->requestTemperatures();
-            int count = b.dt->getDeviceCount();
-
-            for (int i = 0; i < count; i++)
-            {
-                DeviceAddress addr;
-                if (b.dt->getAddress(addr, i))
-                {
-                    float temp = b.dt->getTempC(addr);
-
+                    String rom = String(romStr);
+                    float temp = getTempByRom(rom);
                     // Если датчик не ответил, не включаем его в массив
-                    if (temp != DEVICE_DISCONNECTED_C)
+                    if (temp != -127.0)
                     {
-                        char romStr[17];
-                        for (int j = 0; j < 8; j++)
-                        {
-                            sprintf(romStr + (j * 2), "%02x", addr[j]);
-                        }
-                        String rom = String(romStr);
-                        float correctedTemp = temp + getOffsetByRom(rom); // <-- Применяем смещение
-
                         JsonObject o = arr.createNestedObject();
                         o["id"] = romStr;
-                        o["t"] = fmt2(correctedTemp);
+                        o["t"] = fmt2(temp);
                     }
                 }
             }
@@ -148,8 +194,8 @@ namespace sensors
                     }
                     JsonObject o = arr.createNestedObject();
                     o["rom"] = romStr;
-                    float correctedTemp = b.dt->getTempC(addr) + getOffsetByRom(String(romStr));
-                    o["t"] = fmt2(correctedTemp);
+                    float temp = getTempByRom(String(romStr));
+                    o["t"] = fmt2(temp);
                     o["name"] = getNameByRom(String(romStr));
                 }
             }
