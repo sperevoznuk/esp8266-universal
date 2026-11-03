@@ -19,6 +19,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         input[type="checkbox"] { width: auto; margin: 0; }
         button { background: #28a745; color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; font-size: 16px; }
         button.del { background: #dc3545; width: auto; padding: 5px 10px; margin: 0; font-size: 14px;}
+        button.edit { background: #007bff; width: auto; padding: 5px 10px; margin: 0; font-size: 14px;}
         button.toggle { background: #ffc107; color: #000; padding: 5px 10px; width: auto; font-size: 14px; margin: 0;}
         button.save { background: #007bff; width: 100%; margin-top: 15px; }
         
@@ -140,15 +141,24 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             <div class="tab-desc">Задайте удобные имена для температурных датчиков (DS18B20). Имена будут отображаться во всех разделах, а в блоке состояния — имя и код датчика.</div>
             <div class="table-wrap">
             <table id="sensorNamesTable">
-                <thead><tr><th>ROM-код датчика</th><th>Имя</th><th>Смещение (°C)</th><th style="width:80px">Действие</th></tr></thead>
+                <thead><tr><th>ROM-код датчика</th><th>Имя</th><th>Смещение (°C)</th><th style="width:150px">Действие</th></tr></thead>
                 <tbody></tbody>
             </table>
             </div>
             <div class="row" style="margin-top:15px;">
-                <div class="col"><select id="newSensorRom"></select></div>
-                <div class="col"><input type="text" id="newSensorName" placeholder="Имя датчика" maxlength="30"></div>
-                <div class="col"><input type="number" id="newSensorOffset" placeholder="Смещение (напр. 4.0)" step="0.1" value="0.0" style="width:100%;"></div>
-                <button onclick="addSensorName()" style="width:120px;margin-bottom:10px;">Добавить</button>
+                <button id="addSensorBtn" onclick="openSensorForm()" style="background:#28a745;width:auto;padding:10px 15px;">➕ Добавить датчик</button>
+            </div>
+            <div id="sensorForm" class="form-box" style="display:none;margin-top:10px;">
+                <h3 id="sensorFormTitle" style="margin:0 0 10px 0;font-size:15px;color:#333;">Добавление датчика</h3>
+                <div class="row">
+                    <div class="col"><label>ROM датчика</label><select id="newSensorRom"></select></div>
+                    <div class="col"><label>Имя</label><input type="text" id="newSensorName" placeholder="Имя датчика" maxlength="30"></div>
+                    <div class="col"><label>Смещение (°C)</label><input type="number" id="newSensorOffset" placeholder="Смещение (напр. 4.0)" step="0.1" value="0.0" style="width:100%;"></div>
+                </div>
+                <div class="row" style="margin-top:10px;justify-content:flex-end;">
+                    <button onclick="closeSensorForm()" style="background:#6c757d;width:auto;padding:10px 15px;">Отмена</button>
+                    <button onclick="saveSensorName()" style="background:#007bff;width:auto;padding:10px 15px;">💾 Сохранить</button>
+                </div>
             </div>
         </div>
         <div id="tabRules" class="tab-content">
@@ -391,6 +401,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         // Заполнить выпадающий список ROM-кодов для добавления имени
         function populateSensorRomDropdown() {
             const sel = document.getElementById('newSensorRom');
+            if (sel && sel.disabled) return; // форма в режиме редактирования ROM
             const currentRoms = sensorNames.map(sn => sn.rom);
             const available = availableSensors.filter(s => !currentRoms.includes(s.rom));
             sel.innerHTML = '';
@@ -415,7 +426,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     <td style="font-family:monospace;font-size:12px;">${sn.rom}</td>
                     <td>${sn.name}</td>
                     <td><b>${offsetStr}</b></td>
-                    <td><button class="del" onclick="removeSensorName(${i})">Удалить</button></td>
+                    <td>
+                        <button class="edit" onclick="openSensorForm('${sn.rom}')">Изменить</button>
+                        <button class="del" onclick="removeSensorName(${i})">Удалить</button>
+                    </td>
                 </tr>`;
             });
             if (sensorNames.length === 0) {
@@ -423,28 +437,75 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             }
         }
 
-        // Добавить/обновить имя датчика
-            function addSensorName() {
+        // --- Имена датчиков: скрытая форма добавления/редактирования ---
+
+        // Открыть форму (без аргумента — добавление, с rom — редактирование)
+        function openSensorForm(rom) {
+            document.getElementById('sensorForm').style.display = 'block';
+            document.getElementById('addSensorBtn').style.display = 'none';
+            document.getElementById('sensorFormTitle').textContent = rom ? 'Изменение датчика' : 'Добавление датчика';
+
+            // Наполняем список ROM: в режиме редактирования rома должна быть в списке,
+            // даже если датчик временно не отвечает
+            const sel = document.getElementById('newSensorRom');
+            const currentRoms = sensorNames.map(sn => sn.rom);
+            let available = availableSensors.filter(s => !currentRoms.includes(s.rom) || s.rom === rom);
+            if (rom && !available.some(s => s.rom === rom)) available.push({ rom });
+
+            sel.innerHTML = '';
+            if (available.length === 0) {
+                sel.innerHTML = '<option value="">— Нет датчиков —</option>';
+            } else {
+                available.forEach(s => {
+                    const label = getSensorName(s.rom) ? getSensorName(s.rom) + ' (' + s.rom + ')' : s.rom;
+                    sel.innerHTML += `<option value="${s.rom}">${label}</option>`;
+                });
+            }
+
+            if (rom) {
+                const sn = sensorNames.find(x => x.rom === rom);
+                sel.value = rom;
+                sel.disabled = true; // ROM при редактировании менять нельзя
+                document.getElementById('newSensorName').value = sn ? sn.name : '';
+                document.getElementById('newSensorOffset').value = sn ? sn.offset : 0.0;
+            } else {
+                sel.disabled = false;
+                document.getElementById('newSensorName').value = '';
+                document.getElementById('newSensorOffset').value = '0.0';
+            }
+        }
+
+        // Скрыть форму и вернуть кнопку «Добавить датчик»
+        function closeSensorForm() {
+            const form = document.getElementById('sensorForm');
+            if (form) form.style.display = 'none';
+            const btn = document.getElementById('addSensorBtn');
+            if (btn) btn.style.display = 'block';
+            const sel = document.getElementById('newSensorRom');
+            if (sel) sel.disabled = false;
+            populateSensorRomDropdown();
+        }
+
+        // Сохранить (добавить или обновить) имя датчика
+        function saveSensorName() {
             const rom = document.getElementById('newSensorRom').value;
             const name = document.getElementById('newSensorName').value.trim();
-            const offset = parseFloat(document.getElementById('newSensorOffset').value) || 0.0; // <-- Считываем offset
-            
+            const offset = parseFloat(document.getElementById('newSensorOffset').value) || 0.0;
+
             if (!rom) { alert('Нет доступных датчиков!'); return; }
             if (!name) { alert('Введите имя датчика!'); return; }
-            
+
             const existing = sensorNames.findIndex(sn => sn.rom === rom);
             let action = 'добавлено';
             if (existing >= 0) {
                 sensorNames[existing].name = name;
-                sensorNames[existing].offset = offset;  
+                sensorNames[existing].offset = offset;
                 action = 'обновлено';
             } else {
-                sensorNames.push({ rom, name, offset });  
+                sensorNames.push({ rom, name, offset });
             }
-            
-            document.getElementById('newSensorName').value = '';
-            document.getElementById('newSensorOffset').value = '0.0';  
-            populateSensorRomDropdown();
+
+            closeSensorForm();
             renderTables();
             updateExamplePayload();
             silentSave();
@@ -452,8 +513,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         }
 
         function removeSensorName(i) {
+            const rom = sensorNames[i].rom;
             sensorNames.splice(i, 1);
-            populateSensorRomDropdown();
+            // Если удалённый датчик редактируется в открытой форме — закрываем её
+            const form = document.getElementById('sensorForm');
+            if (form && form.style.display === 'block' && document.getElementById('newSensorRom').value === rom) {
+                closeSensorForm();
+            } else {
+                populateSensorRomDropdown();
+            }
             renderTables();
             updateExamplePayload();
             silentSave();
