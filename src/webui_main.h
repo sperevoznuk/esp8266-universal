@@ -57,7 +57,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         .table-wrap { overflow-x: auto; }
         .table-wrap table { min-width: 500px; }
         #channelsTable { min-width: 300px; }
-        textarea#examplePayload { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: monospace; font-size: 12px; resize: vertical; }
         .rule-cond-cell { min-width: 230px; }
         .rule-cond-cell .rname { font-weight: bold; font-size: 14px; margin-bottom: 3px; }
         .rule-cond-cell .rcond { font-size: 12px; color: #555; margin-bottom: 2px; }
@@ -240,8 +239,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 </div>
                 <div class="row">
                     <div class="col">
-                        <label>Пример данных, которые будут отправлены:</label>
-                        <textarea id="examplePayload" rows="8" readonly></textarea>
+                        <details>
+                            <summary style="cursor:pointer;font-size:14px;">Пример данных, которые будут отправлены:</summary>
+                            <pre id="examplePayload" style="background:#f4f6f8;border:1px solid #ddd;border-radius:4px;padding:8px;font-size:12px;white-space:pre-wrap;word-break:break-all;margin:8px 0 0 0;"></pre>
+                        </details>
                     </div>
                 </div>
                 <div class="row">
@@ -576,7 +577,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     triggered: (r.active || false) ? 1 : 0
                 }))
             };
-            document.getElementById('examplePayload').value = JSON.stringify(payload, null, 2);
+            document.getElementById('examplePayload').textContent = JSON.stringify(payload, null, 2);
         }
 
         // Отправка тест
@@ -616,7 +617,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
         function renderTables() {
             renderSensorNames();
-            // Таблица каналов
+            // Таблица каналов (отсортирована по имени; без имени — в конец)
+            channels.sort((a, b) => {
+                const an = (a.name || '').toLowerCase();
+                const bn = (b.name || '').toLowerCase();
+                if (!an && !bn) return 0;
+                if (!an) return 1;
+                if (!bn) return -1;
+                return an.localeCompare(bn, 'ru');
+            });
             const chBody = document.querySelector('#channelsTable tbody');
             chBody.innerHTML = '';
             channels.forEach((ch, i) => {
@@ -1238,6 +1247,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
                 // Датчики
                 html = '';
+                // Сортируем по алфавиту (по имени; без имени — по ROM)
+                data.sensors.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, 'ru'));
                 data.sensors.forEach(s => {
                     const sname = s.name || '';
                     if (sname) {
