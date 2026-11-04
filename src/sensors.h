@@ -45,7 +45,7 @@ namespace sensors
     // Неблокирующий опрос: конверсия запускается раз в 5 с,
     // результат читается через ~800 мс (12-бит DS18B20 ≈ 750 мс)
     inline const unsigned long SENSOR_POLL_MS = 5000UL;
-    inline const unsigned long CONVERSION_WAIT_MS = 800UL;
+    inline const unsigned long CONVERSION_WAIT_MS = 1200UL;
     inline unsigned long lastRequestAt = 0;
     inline unsigned long conversionStartedAt = 0;
     inline bool conversionPending = false;

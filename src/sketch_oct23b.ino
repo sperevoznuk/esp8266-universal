@@ -35,7 +35,7 @@ void handleRoot() {
 }
 
 void handleGetSensors() {
-    StaticJsonDocument<512> doc;
+    DynamicJsonDocument doc(2048);
     JsonArray arr = doc.to<JsonArray>();
     sensors::listAll(arr);
     String out;
