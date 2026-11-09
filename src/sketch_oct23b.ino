@@ -31,6 +31,8 @@ void setup() {
 
     // Регистрация маршрутов
     server.on("/", api::handleRoot);
+    server.on("/style.css", HTTP_GET, api::handleStyleCss); 
+    server.on("/app.js", HTTP_GET, api::handleAppJs);        
     server.on("/api/config", HTTP_GET, api::handleGetConfig);
     server.on("/api/config", HTTP_POST, api::handleSaveConfig);
     server.on("/api/sensors", HTTP_GET, api::handleGetSensors);

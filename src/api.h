@@ -14,9 +14,7 @@
 #include "wifi_setup.h"
 
 namespace api {
-
-    // --- Главная страница ---
-    inline void handleRoot() {
+   inline void handleRoot() {
         if (wifiSetup::isConfigMode) {
             struct station_config conf;
             wifi_station_get_config(&conf);
@@ -29,6 +27,14 @@ namespace api {
         }
     }
 
+    inline void handleStyleCss() {
+        server.send_P(200, "text/css", WEBUI_CSS);
+    }
+
+    inline void handleAppJs() {
+        server.send_P(200, "application/javascript", WEBUI_JS);
+    }
+     
     // --- Датчики ---
     inline void handleGetSensors() {
         DynamicJsonDocument doc(2048);
