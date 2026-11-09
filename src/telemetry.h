@@ -7,8 +7,6 @@
 #include "common.h"
 #include "sensors.h"
 
-extern ESP8266WebServer server;
-
 namespace telemetry {
 
     // Построение JSON-тела телеметрии в новом формате
@@ -93,53 +91,5 @@ namespace telemetry {
         http.end();
         return success;
     }
-
-    // Обработчик кнопки "Проверить" — POST /api/telemetry/send
-    inline void handleApiTestTelemetry() {
-        // Проверки
-        if (g_config.serverUrl.length() == 0) {
-            server.send(400, "application/json", "{\"status\":\"error\",\"error\":\"URL сервера не задан\"}");
-            return;
-        }
-        if (WiFi.status() != WL_CONNECTED) {
-            server.send(502, "application/json", "{\"status\":\"error\",\"error\":\"Нет подключения к Wi-Fi\"}");
-            return;
-        }
-
-        String payload = buildPayload();
-        logf("Телеметрия: проверка, %d байт на %s", payload.length(), g_config.serverUrl.c_str());
-
-        WiFiClientSecure client;
-        client.setInsecure();
-        HTTPClient http;
-        http.setTimeout(3000);
-        http.begin(client, g_config.serverUrl);
-        http.addHeader("Content-Type", "application/json");
-        int httpCode = http.POST(payload);
-        yield();
-
-        // Формируем ответ
-        DynamicJsonDocument result(2048);
-        if (httpCode > 0) {
-            String body = http.getString();
-            yield();
-            logf("Телеметрия: ответ %d — %s", httpCode, body.c_str());
-            result["status"] = (httpCode >= 200 && httpCode < 300) ? "ok" : "error";
-            result["httpCode"] = httpCode;
-            result["response"] = body;
-            if (httpCode >= 400 && body.length() > 0) result["error"] = body;
-        } else {
-            logf("Телеметрия: ошибка %s", http.errorToString(httpCode).c_str());
-            result["status"] = "error";
-            result["error"] = http.errorToString(httpCode);
-            result["response"] = "";
-        }
-        http.end();
-
-        String out;
-        serializeJson(result, out);
-        server.send(200, "application/json", out);
-    }
-
-
+ 
 }

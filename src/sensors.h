@@ -89,19 +89,18 @@ namespace sensors
                 b.oneWire = new OneWire(ch.pin);
                 b.dt = new DallasTemperature(b.oneWire);
                 
+                // Инициализируем шину
                 b.dt->begin();
                 
-                // ВАЖНО: Сначала делаем БЛОКИРУЮЩИЙ опрос, как в тестовом скетче!
-                // Это занимает ~750мс при старте, но гарантирует поиск датчиков.
-                logf("Поиск DS18B20 на пине %d (ожидание 750мс)...", ch.pin);
-                b.dt->requestTemperatures(); 
-                
+                // Даем железной подтяжке ESP8266 стабилизировать линию
+                delay(100);
+
+                // Ищем датчики (БЕЗ requestTemperatures!)
                 int count = b.dt->getDeviceCount();
                 logf("Шина DS18B20 на пине %d: найдено устройств = %d", ch.pin, count);
                 
                 b.deviceCount = count;
                 if (count > 0) {
-                    // Включаем асинхронный режим ТОЛЬКО после успешного поиска
                     b.dt->setWaitForConversion(false);
                 }
                 
