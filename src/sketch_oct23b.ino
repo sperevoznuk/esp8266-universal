@@ -45,266 +45,76 @@ void handleGetSensors() {
 
 void handleGetConfig() {
     DynamicJsonDocument doc(4096);
-    doc["deviceName"] = g_config.deviceName;
-    doc["serverUrl"] = g_config.serverUrl;
-    doc["period"] = g_config.period;
-    
-    // Текущий сохраненный SSID и пароль из флеша ESP
-    struct station_config conf;
-    wifi_station_get_config(&conf);
-    doc["ssid"] = String((char*)conf.ssid);
-    doc["pass"] = String((char*)conf.password);
-    
-    JsonArray chArr = doc.createNestedArray("channels");
-    for (auto& ch : g_config.channels) {
-        JsonObject c = chArr.createNestedObject();
-        c["type"] = ch.type; c["pin"] = ch.pin; c["name"] = ch.name;
-    }
-    
-    JsonArray rArr = doc.createNestedArray("rules");
-    for (auto& r : g_config.rules) {
-        JsonObject jr = rArr.createNestedObject();
-        jr["id"] = r.id; jr["enabled"] = r.enabled; jr["name"] = r.name; jr["condType"] = r.condType; jr["combine"] = r.combine;
-        if (r.condType == "sensor") {
-            JsonArray sensArr = jr.createNestedArray("sensors");
-            for (auto& sc : r.sensors) {
-                JsonObject s = sensArr.createNestedObject();
-                s["rom"] = sc.rom;
-                s["target"] = sc.target;
-                s["hysteresis"] = sc.hysteresis;
-                s["mode"] = sc.mode;
-            }
-        } else {
-            JsonArray pArr = jr.createNestedArray("sourcePins");
-            for (uint8_t pin : r.sourcePins) pArr.add(pin);
-        }
-        JsonArray acts = jr.createNestedArray("actuators");
-        for (uint8_t a : r.actuators) acts.add(a);
-    }
-    
-    // Имена датчиков
-    JsonArray snArr = doc.createNestedArray("sensorNames");
-    for (const auto& sn : g_config.sensorNames) {
-        JsonObject o = snArr.createNestedObject();
-        o["rom"] = sn.rom;
-        o["name"] = sn.name;
-        o["offset"] = sn.offset;
-    }
-    
+    configJson::toJson(g_config, doc, /*includeWifi=*/true);
     String out;
     serializeJson(doc, out);
     server.send(200, "application/json", out);
-}
-
-// Валидация конфига на наличие циклов и битых ссылок
-bool validateConfig(const DynamicJsonDocument& doc) {
-    JsonArrayConst chArr = doc["channels"];
-    JsonArrayConst rArr = doc["rules"];
-    
-    // 1. Проверка уникальности пинов каналов
-    std::vector<int> pins;
-    for (JsonVariantConst c : chArr) {
-        int p = c["pin"];
-        if (std::find(pins.begin(), pins.end(), p) != pins.end()) return false;
-        pins.push_back(p);
-    }
-
-    // 2. Проверка ссылок в правилах и поиск циклов
-    // Строим граф зависимостей: source_pin -> [actuator_pins]
-    std::map<int, std::vector<int>> graph;
-    
-    for (JsonVariantConst r : rArr) {
-        String ctype = r["condType"].as<String>();
-        if (ctype.isEmpty()) ctype = r["cond"]["type"].as<String>(); // совместимость
-        
-        // Проверка sensor-правил: нужен хотя бы 1 датчик, макс 3
-        if (ctype == "sensor") {
-            JsonArrayConst sArr = r["sensors"];
-            if (sArr.size() == 0 || sArr.size() > 3) return false;
-        }
-        
-        // Проверка button/relay: 1-3 источника
-        if (ctype == "button" || ctype == "relay") {
-            JsonArrayConst pArr = r["sourcePins"];
-            if (pArr.size() == 0 || pArr.size() > 3) return false;
-        }
-        
-        if (ctype == "relay") {
-            // Определяем список source-пинов (поддержка старого формата cond.pin)
-            std::vector<int> relaySources;
-            JsonArrayConst pArr = r["sourcePins"];
-            if (pArr.size() > 0) {
-                for (JsonVariantConst v : pArr) relaySources.push_back(v.as<int>());
-            } else {
-                int oldPin = r["cond"]["pin"];
-                if (oldPin) relaySources.push_back(oldPin);
-            }
-            for (int src : relaySources) {
-                JsonArrayConst acts = r["actuators"];
-                for (JsonVariantConst act : acts) {
-                    int dst = act;
-                    bool isRelay = false;
-                    for (JsonVariantConst c : chArr) {
-                        if (c["pin"] == dst && c["type"] == "relay") isRelay = true;
-                    }
-                    if (!isRelay) return false;
-                    graph[src].push_back(dst);
-                }
-            }
-        }
-    }
-
-    // Поиск циклов (DFS)
-    std::map<int, int> visited; // 0 - не посещен, 1 - в процессе, 2 - завершен
-    std::function<bool(int)> hasCycle = [&](int node) {
-        if (visited[node] == 1) return true;
-        if (visited[node] == 2) return false;
-        visited[node] = 1;
-        for (int next : graph[node]) {
-            if (hasCycle(next)) return true;
-        }
-        visited[node] = 2;
-        return false;
-    };
-
-    for (auto const& [node, edges] : graph) {
-        if (hasCycle(node)) return false;
-    }
-
-    return true;
 }
 
 void handleSaveConfig() {
     if (!server.hasArg("plain")) { server.send(400, "text/plain", "No body"); return; }
     
     DynamicJsonDocument doc(4096);
-    if (deserializeJson(doc, server.arg("plain"))) { server.send(400, "text/plain", "Invalid JSON"); return; }
-
-    if (!validateConfig(doc)) {
-        server.send(400, "text/plain", "Ошибка валидации: проверьте уникальность пинов и отсутствие циклов в правилах.");
+    if (deserializeJson(doc, server.arg("plain"))) {
+        server.send(400, "text/plain", "Invalid JSON");
         return;
     }
 
-    // Если валидация прошла, сохраняем
-    
-    // Сохраняем старые состояния enabled для детекции выключений правил
-    std::map<String, bool> oldEnabled;
-    for (const auto& old : g_config.rules) {
-        oldEnabled[old.id] = old.enabled;
-    }
-    // И старые актуаторы — чтобы знать, какие реле выключать
-    std::map<String, std::vector<uint8_t>> oldActuators;
-    for (const auto& old : g_config.rules) {
-        oldActuators[old.id] = old.actuators;
-    }
-    
-    g_config.channels.clear();
-    g_config.rules.clear();
-    
-    g_config.deviceName = doc["deviceName"] | "";
-    g_config.serverUrl = doc["serverUrl"] | "";
-    g_config.period = doc["period"] | 60;
-    
-    for (JsonVariantConst c : doc["channels"].as<JsonArrayConst>()) {
-        Channel ch; ch.type = c["type"].as<String>(); ch.pin = c["pin"]; ch.name = c["name"].as<String>();
-        g_config.channels.push_back(ch);
-    }
-    
-    for (JsonVariantConst r : doc["rules"].as<JsonArrayConst>()) {
-        Rule rule;
-        rule.id = r["id"].as<String>(); rule.enabled = r["enabled"]; rule.name = r["name"].as<String>();
-        rule.condType = r["condType"].as<String>();
-        if (rule.condType.isEmpty()) rule.condType = r["cond"]["type"].as<String>();
-        rule.combine = r["combine"] | "and"; // совместимость
-        
-        if (rule.condType == "sensor") {
-            // Пробуем sensors массив; для совместимости — cond["rom"]
-            JsonArrayConst sArr = r["sensors"];
-            if (sArr.size() > 0) {
-                for (JsonVariantConst s : sArr) {
-                    SensorCondition sc;
-                    sc.rom = s["rom"].as<String>();
-                    sc.target = s["target"];
-                    sc.hysteresis = s["hysteresis"] | 0.5;
-                    sc.mode = s["mode"] | true;
-                    sc.active = false;
-                    rule.sensors.push_back(sc);
-                }
-            } else {
-                // Старый формат: один датчик
-                SensorCondition sc;
-                sc.rom = r["cond"]["rom"].as<String>();
-                sc.target = r["cond"]["target"] | r["target"] | 0.0;
-                sc.hysteresis = r["cond"]["hysteresis"] | r["hysteresis"] | 0.5;
-                sc.mode = true;
-                sc.active = false;
-                rule.sensors.push_back(sc);
-            }
-        } else {
-            JsonArrayConst pArr = r["sourcePins"];
-            if (pArr.size() > 0) {
-                for (JsonVariantConst v : pArr) rule.sourcePins.push_back(v.as<uint8_t>());
-            } else {
-                // Старый формат: один пин из cond
-                rule.sourcePins.push_back(r["cond"]["pin"].as<uint8_t>());
-            }
-        }
-        JsonArrayConst acts = r["actuators"];
-        for (JsonVariantConst a : acts) rule.actuators.push_back(a);
-        rule.prevEnabled = rule.enabled;
-        g_config.rules.push_back(rule);
-    }
-    
-    // Детекция выключения правил: если правило было включено, а стало выключено — выключить его актуаторы
-    for (const auto& r : g_config.rules) {
-        auto it = oldEnabled.find(r.id);
-        if (it != oldEnabled.end() && it->second && !r.enabled) {
-            for (uint8_t pin : r.actuators) {
-                channels::setRelay(pin, false);
-            }
-        }
-    }
-    
-    g_config.sensorNames.clear();
-    for (JsonVariantConst sn : doc["sensorNames"].as<JsonArrayConst>()) {
-        SensorNameEntry e;
-        e.rom = sn["rom"].as<String>();
-        e.name = sn["name"].as<String>();
-        e.offset = sn["offset"] | 0.0; 
-        g_config.sensorNames.push_back(e);
+    // 1. Парсим во временный Config
+    Config newCfg;
+    if (!configJson::fromJson(doc, newCfg)) {
+        server.send(400, "text/plain", "Неверный формат конфига");
+        return;
     }
 
+    // 2. Валидация
+    String err = configJson::validate(newCfg);
+    if (err.length() > 0) {
+        server.send(400, "text/plain", "Ошибка валидации: " + err);
+        return;
+    }
+
+    // 3. Детекция выключения правил (до замены g_config)
+    //    Если правило было enabled, а стало disabled — выключаем его реле.
+    for (const auto& newRule : newCfg.rules) {
+        for (const auto& oldRule : g_config.rules) {
+            if (oldRule.id == newRule.id && oldRule.enabled && !newRule.enabled) {
+                for (uint8_t pin : oldRule.actuators) channels::setRelay(pin, false);
+            }
+        }
+    }
+
+    // 4. Применяем новый конфиг
+    g_config = newCfg;
+
+    // 5. Сохраняем в LittleFS
     storage::save();
-    
-    // Применяем Wi-Fi настройки только если они изменились
+
+    // 6. Wi-Fi
     String ssid = doc["ssid"] | "";
     String pass = doc["pass"] | "";
     bool wifiChanged = false;
-    
+
     if (ssid.length() > 0) {
         struct station_config staConf;
         wifi_station_get_config(&staConf);
         String currSsid = String((char*)staConf.ssid);
         String currPass = String((char*)staConf.password);
-        
-        // Кредалы изменились — применяем
         if (ssid != currSsid || (pass.length() > 0 && pass != currPass)) {
             wifiChanged = true;
             WiFi.persistent(true);
             WiFi.begin(ssid.c_str(), pass.c_str());
             logf("Wi-Fi изменён: SSID=%s", ssid.c_str());
-        } else {
-            // Тот же SSID и пустой пароль — не трогаем Wi-Fi
-            logf("Wi-Fi не изменён, перезагрузка не требуется");
         }
     }
-    
+
     server.send(200, "application/json", "{\"status\":\"ok\"}");
     if (wifiChanged) {
         delay(1000);
         ESP.restart();
     }
 }
+
 
 void handleApiStatus() {
     DynamicJsonDocument doc(2048);
