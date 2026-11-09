@@ -109,7 +109,7 @@ namespace sensors
     }
 
     // Инициализация шин датчиков (может быть несколько)
-    inline void begin()
+      inline void begin()
     {
         buses.clear();
         for (const auto &ch : g_config.channels)
@@ -128,15 +128,21 @@ namespace sensors
                     b.oneWire = new OneWire(ch.pin);
                     b.dt = new DallasTemperature(b.oneWire);
                     b.dt->begin();
-                    b.dt->setWaitForConversion(false); // асинхронная конверсия, без блокировки loop
+                    
+                    delay(100);  
+
+                    int count = b.dt->getDeviceCount();
+                    logf("Шина DS18B20 на пине %d: найдено устройств = %d", ch.pin, count);
+
+                    b.dt->setWaitForConversion(false);  
                     buses.push_back(b);
-                    logf("Шина DS18B20 инициализирована на пине %d", ch.pin);
                 }
             }
         }
         if (!buses.empty())
-            requestConversion(); // первый опрос сразу после старта
+            requestConversion();  
     }
+
 
     // Получить температуру по ROM-адресу (из кэша, без опроса шины)
     inline float getTempByRom(const String &rom)

@@ -77,8 +77,6 @@ namespace logic {
         return false;
     }
 
-    // Применение состояний ко всем реле по правилам (OR-логика)
-    // Возвращает true, если хоть одно реле изменило состояние
     inline bool applyRelayStates() {
         bool anyChanged = false;
         for (auto& ch : g_config.channels) {
@@ -96,8 +94,9 @@ namespace logic {
                 if (r.active) { shouldBeOn = true; break; }
             }
             if (hasRules) {
-                channels::setRelay(ch.pin, shouldBeOn);
-                anyChanged = true;
+                if (channels::setRelay(ch.pin, shouldBeOn)) {
+                    anyChanged = true;
+                }
             }
         }
         return anyChanged;
