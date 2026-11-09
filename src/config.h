@@ -53,6 +53,13 @@ struct Config {
     String serverUrl;
     uint16_t period = 0; // 0 = ручной режим (автоотправка отключена), иначе период в секундах
     uint32_t configVersion = 0;
+
+    bool mqttEnabled = false;
+    String mqttServer = "";
+    uint16_t mqttPort = 1883;
+    String mqttUser = "";
+    String mqttPass = "";
+
     std::vector<Channel> channels; 
     std::vector<Rule> rules;
     std::vector<SensorNameEntry> sensorNames;

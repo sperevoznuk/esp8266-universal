@@ -16,6 +16,13 @@ namespace configJson {
         doc["period"]     = cfg.period;
         doc["configVersion"] = cfg.configVersion;
 
+        // MQTT
+        doc["mqttEnabled"] = cfg.mqttEnabled;
+        doc["mqttServer"]  = cfg.mqttServer;
+        doc["mqttPort"]    = cfg.mqttPort;
+        doc["mqttUser"]    = cfg.mqttUser;
+        doc["mqttPass"]    = cfg.mqttPass;
+
         if (includeWifi) {
             struct station_config conf;
             wifi_station_get_config(&conf);
@@ -76,6 +83,13 @@ namespace configJson {
         cfg.serverUrl  = doc["serverUrl"]  | "";
         cfg.period     = doc["period"]     | 0;
         cfg.configVersion = doc["configVersion"] | 0;
+
+        // MQTT
+        cfg.mqttEnabled = doc["mqttEnabled"] | false;
+        cfg.mqttServer  = doc["mqttServer"]  | "";
+        cfg.mqttPort    = doc["mqttPort"]    | 1883;
+        cfg.mqttUser    = doc["mqttUser"]    | "";
+        cfg.mqttPass    = doc["mqttPass"]    | "";
 
         cfg.channels.clear();
         for (JsonObjectConst c : doc["channels"].as<JsonArrayConst>()) {

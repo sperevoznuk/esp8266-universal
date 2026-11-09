@@ -14,23 +14,14 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
         // --- Уведомления (Toast) ---
         function showNotification(msg, showRebootBtn) {
             const container = document.getElementById('toastContainer');
-            
-            // Если уведомление требует перезагрузки — удаляем все предыдущие
-            if (showRebootBtn) {
-                container.innerHTML = '';
-            }
-            
+            if (showRebootBtn) container.innerHTML = '';
             const toast = document.createElement('div');
             toast.className = 'toast info';
-            
             let html = `<span class="toast-msg">${msg}</span>`;
-            if (showRebootBtn) {
-                html += `<button class="toast-btn" onclick="rebootDevice()">🔄 Перезагрузить</button>`;
-            }
+            if (showRebootBtn) html += `<button class="toast-btn" onclick="rebootDevice()">🔄 Перезагрузить</button>`;
             html += `<button class="toast-close" onclick="dismissToast(this)">✕</button>`;
             toast.innerHTML = html;
             container.appendChild(toast);
-            
             if (!showRebootBtn) {
                 setTimeout(() => {
                     if (toast.parentNode) {
@@ -46,34 +37,46 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             if (toast) { toast.style.animation = 'toastOut 0.3s ease'; setTimeout(() => { if (toast.parentNode) toast.remove(); }, 300); }
         }
 
+        // --- СБОР ПОЛНОГО КОНФИГА (для сохранения) ---
+        function getFullConfig() {
+            return {
+                channels, rules, sensorNames,
+                deviceName: document.getElementById('deviceName').value.trim(),
+                serverUrl: document.getElementById('serverUrl').value.trim(),
+                period: parseInt(document.getElementById('periodSelect').value) || 0,
+                ssid: document.getElementById('wifiSsid').value.trim(),
+                pass: document.getElementById('wifiPass').value,
+                // --- MQTT ---
+                mqttEnabled: document.getElementById('mqttEnabled').checked,
+                mqttServer: document.getElementById('mqttServer').value.trim(),
+                mqttPort: parseInt(document.getElementById('mqttPort').value) || 1883,
+                mqttUser: document.getElementById('mqttUser').value.trim(),
+                mqttPass: document.getElementById('mqttPass').value
+            };
+        }
+
         // --- Фильтрация списка пинов (скрытие занятых) ---
         function populatePinDropdown() {
             const select = document.getElementById('newPin');
             const usedPins = channels.map(c => c.pin);
-            // Если в режиме редактирования — исключаем текущий пин канала
             if (editChannelIndex >= 0) {
                 const curPin = channels[editChannelIndex].pin;
                 const idx = usedPins.indexOf(curPin);
                 if (idx >= 0) usedPins.splice(idx, 1);
             }
-            
-            // Удаляем статичные плейсхолдеры из предыдущих вызовов
             const oldPh = document.getElementById('newPinPlaceholder');
             if (oldPh) oldPh.remove();
             
             let anyVisible = false;
             for (let opt of select.options) {
                 const val = parseInt(opt.value);
-                if (isNaN(val)) continue; // пропускаем нечисловые option
+                if (isNaN(val)) continue;
                 const isUsed = usedPins.includes(val);
                 opt.disabled = isUsed;
                 opt.style.display = isUsed ? 'none' : '';
-                // Убираем selected с занятых пинов
                 if (isUsed && opt.selected) opt.selected = false;
                 if (!isUsed) anyVisible = true;
             }
-            
-            // Если ни один пин не доступен — показываем плейсхолдер
             if (!anyVisible && editChannelIndex < 0) {
                 const ph = document.createElement('option');
                 ph.value = '';
@@ -94,16 +97,14 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             if (name === 'sensorsTab') populateSensorRomDropdown();
         }
 
-        // Получить имя датчика по ROM
         function getSensorName(rom) {
             const found = sensorNames.find(sn => sn.rom === rom);
             return found ? found.name : '';
         }
 
-        // Заполнить выпадающий список ROM-кодов для добавления имени
         function populateSensorRomDropdown() {
             const sel = document.getElementById('newSensorRom');
-            if (sel && sel.disabled) return; // форма в режиме редактирования ROM
+            if (sel && sel.disabled) return;
             const currentRoms = sensorNames.map(sn => sn.rom);
             const available = availableSensors.filter(s => !currentRoms.includes(s.rom));
             sel.innerHTML = '';
@@ -118,7 +119,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             renderSensorNames();
         }
 
-        // Рендер таблицы имён датчиков
         function renderSensorNames() {
             const tbody = document.querySelector('#sensorNamesTable tbody');
             tbody.innerHTML = '';
@@ -139,21 +139,14 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             }
         }
 
-        // --- Имена датчиков: скрытая форма добавления/редактирования ---
-
-        // Открыть форму (без аргумента — добавление, с rom — редактирование)
         function openSensorForm(rom) {
             document.getElementById('sensorForm').style.display = 'block';
             document.getElementById('addSensorBtn').style.display = 'none';
             document.getElementById('sensorFormTitle').textContent = rom ? 'Изменение датчика' : 'Добавление датчика';
-
-            // Наполняем список ROM: в режиме редактирования rома должна быть в списке,
-            // даже если датчик временно не отвечает
             const sel = document.getElementById('newSensorRom');
             const currentRoms = sensorNames.map(sn => sn.rom);
             let available = availableSensors.filter(s => !currentRoms.includes(s.rom) || s.rom === rom);
             if (rom && !available.some(s => s.rom === rom)) available.push({ rom });
-
             sel.innerHTML = '';
             if (available.length === 0) {
                 sel.innerHTML = '<option value="">— Нет датчиков —</option>';
@@ -163,11 +156,10 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
                     sel.innerHTML += `<option value="${s.rom}">${label}</option>`;
                 });
             }
-
             if (rom) {
                 const sn = sensorNames.find(x => x.rom === rom);
                 sel.value = rom;
-                sel.disabled = true; // ROM при редактировании менять нельзя
+                sel.disabled = true;
                 document.getElementById('newSensorName').value = sn ? sn.name : '';
                 document.getElementById('newSensorOffset').value = sn ? sn.offset : 0.0;
             } else {
@@ -177,7 +169,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             }
         }
 
-        // Скрыть форму и вернуть кнопку «Добавить датчик»
         function closeSensorForm() {
             const form = document.getElementById('sensorForm');
             if (form) form.style.display = 'none';
@@ -188,15 +179,12 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             populateSensorRomDropdown();
         }
 
-        // Сохранить (добавить или обновить) имя датчика
         function saveSensorName() {
             const rom = document.getElementById('newSensorRom').value;
             const name = document.getElementById('newSensorName').value.trim();
             const offset = parseFloat(document.getElementById('newSensorOffset').value) || 0.0;
-
             if (!rom) { alert('Нет доступных датчиков!'); return; }
             if (!name) { alert('Введите имя датчика!'); return; }
-
             const existing = sensorNames.findIndex(sn => sn.rom === rom);
             let action = 'добавлено';
             if (existing >= 0) {
@@ -206,7 +194,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             } else {
                 sensorNames.push({ rom, name, offset });
             }
-
             closeSensorForm();
             renderTables();
             updateExamplePayload();
@@ -217,7 +204,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
         function removeSensorName(i) {
             const rom = sensorNames[i].rom;
             sensorNames.splice(i, 1);
-            // Если удалённый датчик редактируется в открытой форме — закрываем её
             const form = document.getElementById('sensorForm');
             if (form && form.style.display === 'block' && document.getElementById('newSensorRom').value === rom) {
                 closeSensorForm();
@@ -230,7 +216,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             showNotification('Имя датчика удалено');
         }
 
-        // Загрузка конфига
         async function loadConfig() {
             const res = await fetch('/api/config');
             const data = await res.json();
@@ -242,28 +227,42 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             if (data.period !== undefined) document.getElementById('periodSelect').value = data.period;
             if (data.ssid) { wifiSsid = data.ssid; document.getElementById('wifiSsid').value = data.ssid; }
             if (data.pass) { wifiPass = data.pass; document.getElementById('wifiPass').value = data.pass; }
+            
+            // --- MQTT ---
+            if (data.mqttEnabled !== undefined) document.getElementById('mqttEnabled').checked = data.mqttEnabled;
+            if (data.mqttServer) document.getElementById('mqttServer').value = data.mqttServer;
+            if (data.mqttPort) document.getElementById('mqttPort').value = data.mqttPort;
+            if (data.mqttUser) document.getElementById('mqttUser').value = data.mqttUser;
+            if (data.mqttPass) document.getElementById('mqttPass').value = data.mqttPass;
+
             renderTables();
             populatePinDropdown();
             updateExamplePayload();
         }
 
-        // Генерация примера отправляемых данных (телеметрия) — новый формат
+        async function saveMqttSettings() {
+            const config = getFullConfig();
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                if (res.ok) showNotification('Настройки MQTT сохранены. Перезагрузка...', true);
+                else alert('Ошибка: ' + await res.text());
+            } catch (e) { console.error(e); }
+        }
+
         function updateExamplePayload() {
             const sensorList = [];
-            
-            // Каналы: relay/button → id = имя или "Dx", value = 1/0
             channels.filter(c => c.type !== 'sensor').forEach(c => {
                 const id = pinNames[c.pin] || 'D' + c.pin;
                 sensorList.push({ id, value: 0 });
             });
-            
-            // Температурные датчики (по ROM из availableSensors)
-            // Берем из sensorNames (если имя задано) или просто ROM
             availableSensors.forEach(s => {
                 const sn = sensorNames.find(n => n.rom === s.rom);
                 sensorList.push({ id: sn ? sn.rom : s.rom, value: (parseFloat(s.t) || 0).toFixed(2) });
             });
-
             const payload = {
                 sensors: sensorList,
                 rules: rules.map(r => ({
@@ -275,7 +274,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             document.getElementById('examplePayload').textContent = JSON.stringify(payload, null, 2);
         }
 
-        // Отправка тест
         async function testTelemetry() {
             const log = document.getElementById('telemetryLog');
             try {
@@ -303,7 +301,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             }
         }
 
-        // Загрузка датчиков для списков
         async function loadSensors() {
             const res = await fetch('/api/sensors');
             availableSensors = await res.json();
@@ -312,7 +309,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
 
         function renderTables() {
             renderSensorNames();
-            // Таблица каналов (отсортирована по имени; без имени — в конец)
             channels.sort((a, b) => {
                 const an = (a.name || '').toLowerCase();
                 const bn = (b.name || '').toLowerCase();
@@ -334,7 +330,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
                 </tr>`;
             });
 
-            // Таблица правил
             const rBody = document.querySelector('#rulesTable tbody');
             rBody.innerHTML = '';
             rules.forEach((r, i) => {
@@ -367,14 +362,12 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
                 </tr>`;
             });
 
-            updateRuleSource(); // Обновить выпадающие списки в форме
+            updateRuleSource();
             populatePinDropdown();
         }
 
-        // Обновление полей формы в зависимости от типа условия
         function updateRuleSource() {
             renderSourceRows();
-            // Обновление чекбоксов для actuators (только реле)
             const actsDiv = document.getElementById('actuatorsList');
             actsDiv.innerHTML = '';
             channels.filter(c => c.type === 'relay').forEach(c => {
@@ -382,14 +375,11 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             });
         }
 
-        // Количество строк источников (датчиков/кнопок/реле)
         let currentSourceCount = 1;
 
         function renderSourceRows(savedValues) {
             const type = document.getElementById('ruleCondType').value;
             const container = document.getElementById('sourceRows');
-
-            // Сохраняем значения текущих строк (если не переданы через savedValues)
             const saved = savedValues || collectSourceRowValues();
             const isSensor = type === 'sensor';
             const addLabel = isSensor ? 'датчик' : (type === 'button' ? 'кнопку' : 'реле');
@@ -415,10 +405,8 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             }
             container.innerHTML = html;
 
-            // Восстанавливаем значения (заполнение селектов + поля)
             for (let i = 0; i < saved.length; i++) {
                 const s = saved[i] || { source: '', target: '', hyst: '0.5', mode: 'true' };
-
                 const sel = document.getElementById(`srcSel${i}`);
                 sel.innerHTML = `<option value="">— выберите ${addLabel} —</option>`;
                 if (isSensor) {
@@ -437,7 +425,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
                         if (opt.value === String(s.source)) { opt.selected = true; break; }
                     }
                 }
-
                 if (isSensor) {
                     const tInp = document.getElementById(`srcTarget${i}`);
                     const hInp = document.getElementById(`srcHyst${i}`);
@@ -449,7 +436,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             }
         }
 
-        // Сбор значений строк из DOM (по currentSourceCount)
         function collectSourceRowValues() {
             const type = document.getElementById('ruleCondType').value;
             const isSensor = type === 'sensor';
@@ -488,7 +474,7 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
         function removeSourceRow(idx) {
             if (currentSourceCount > 1) {
                 const saved = collectSourceRowValues();
-                saved.splice(idx, 1); // Удаляем именно выбранную строку
+                saved.splice(idx, 1);
                 currentSourceCount = saved.length;
                 renderSourceRows(saved);
             }
@@ -510,7 +496,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             const name = document.getElementById('newName').value.trim();
             
             if (editChannelIndex >= 0) {
-                // Режим редактирования
                 channels[editChannelIndex].type = type;
                 channels[editChannelIndex].pin = pin;
                 channels[editChannelIndex].name = name;
@@ -539,9 +524,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
         
         function removeRule(i) { if (confirm('Удалить правило?')) { rules.splice(i, 1); renderTables(); silentSave(); showNotification('Правило удалено'); } }
 
-        // --- Правила: скрытая форма добавления/редактирования ---
-
-        // Открыть форму в режиме добавления (editRule открывает её в режиме редактирования)
         function openRuleForm() {
             const form = document.getElementById('ruleForm');
             if (form) form.style.display = 'block';
@@ -551,14 +533,12 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             document.getElementById('addRuleBtn').textContent = 'Добавить правило';
         }
 
-        // Скрыть форму и сбросить её состояние (кнопка «Отмена»)
         function closeRuleForm() {
             editRuleIndex = -1;
             resetRuleForm();
         }
 
         function editRule(i) {
-            // Открыть форму в режиме редактирования
             document.getElementById('ruleForm').style.display = 'block';
             document.getElementById('rulesAddBtn').style.display = 'none';
             document.getElementById('ruleFormTitle').textContent = 'Изменение правила';
@@ -569,7 +549,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             document.getElementById('ruleCombine').value = r.combine || 'and';
             document.getElementById('ruleEnabled').checked = r.enabled;
 
-            // Определяем количество строк по количеству источников правила
             if ((r.condType || 'sensor') === 'sensor') {
                 const sensors = r.sensors || [];
                 currentSourceCount = Math.min(Math.max(sensors.length, 1), 3);
@@ -602,8 +581,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
                         if (mSel) mSel.value = sc.mode ? 'true' : 'false';
                     }
                 }
-
-                // Отметить актуаторы
                 document.querySelectorAll('#actuatorsList input').forEach(cb => {
                     cb.checked = r.actuators.includes(parseInt(cb.value));
                 });
@@ -615,8 +592,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
         function addRule() {
             const name = document.getElementById('ruleName').value.trim();
             const type = document.getElementById('ruleCondType').value;
-            
-            // Сбор выбранных реле
             const acts = [];
             document.querySelectorAll('#actuatorsList input:checked').forEach(cb => {
                 acts.push(parseInt(cb.value));
@@ -629,7 +604,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             const rows = collectSourceRowValues();
             
             if (type === 'sensor') {
-                // Собираем данные с строк датчиков
                 const sensors = [];
                 for (let i = 0; i < rows.length; i++) {
                     const row = rows[i];
@@ -661,7 +635,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
                 const id = Math.random().toString(16).substr(2, 8);
                 rules.push({ id, name, enabled, condType: type, combine, sensors, sourcePins: [], actuators: acts });
             } else {
-                // Собираем пины кнопок/реле
                 const sourcePins = [];
                 for (let i = 0; i < rows.length; i++) {
                     const row = rows[i];
@@ -699,15 +672,11 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             document.getElementById('ruleName').value = '';
             document.getElementById('ruleEnabled').checked = true;
             document.getElementById('ruleCombine').value = 'and';
-            // Сбросить селекты актуаторов
             document.querySelectorAll('#actuatorsList input').forEach(cb => cb.checked = false);
-            // Сбросить строки источников
             currentSourceCount = 1;
             document.getElementById('ruleCondType').value = 'sensor';
             updateRuleSource();
-            // Скролл к таблице правил
             scrollToRules();
-            // Скрыть форму и вернуть кнопку «Добавить правило»
             const form = document.getElementById('ruleForm');
             if (form) form.style.display = 'none';
             const addBtn = document.getElementById('rulesAddBtn');
@@ -720,14 +689,7 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
         }
 
         async function silentSave() {
-            const config = {
-                channels, rules, sensorNames,
-                deviceName: document.getElementById('deviceName').value.trim(),
-                serverUrl: document.getElementById('serverUrl').value.trim(),
-                period: parseInt(document.getElementById('periodSelect').value) || 0,
-                ssid: document.getElementById('wifiSsid').value.trim(),
-                pass: document.getElementById('wifiPass').value
-            };
+            const config = getFullConfig();
             try {
                 const res = await fetch('/api/config', {
                     method: 'POST',
@@ -738,17 +700,9 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             } catch (e) { console.error(e); }
         }
 
-        // --- Сохранение настроек Wi-Fi (с подтверждением) ---
         async function saveWifiSettings() {
             if (!confirm('Сохранение настроек сети вызовет перезагрузку устройства. Продолжить?')) return;
-            const config = {
-                channels, rules, sensorNames,
-                deviceName: document.getElementById('deviceName').value.trim(),
-                serverUrl: document.getElementById('serverUrl').value.trim(),
-                period: parseInt(document.getElementById('periodSelect').value) || 0,
-                ssid: document.getElementById('wifiSsid').value.trim(),
-                pass: document.getElementById('wifiPass').value
-            };
+            const config = getFullConfig();
             try {
                 const res = await fetch('/api/config', {
                     method: 'POST',
@@ -760,16 +714,8 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             } catch (e) { console.error(e); }
         }
 
-        // --- Сохранение настроек телеметрии (без подтверждения) ---
         async function saveTelemetrySettings() {
-            const config = {
-                channels, rules, sensorNames,
-                deviceName: document.getElementById('deviceName').value.trim(),
-                serverUrl: document.getElementById('serverUrl').value.trim(),
-                period: parseInt(document.getElementById('periodSelect').value) || 0,
-                ssid: document.getElementById('wifiSsid').value.trim(),
-                pass: document.getElementById('wifiPass').value
-            };
+            const config = getFullConfig();
             try {
                 const res = await fetch('/api/config', {
                     method: 'POST',
@@ -781,16 +727,13 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             } catch (e) { console.error(e); }
         }
 
-        // --- Обратный отсчёт до перезагрузки (общий таймер) ---
         function showRebootCountdown(msg) {
             const container = document.getElementById('toastContainer');
             container.innerHTML = '';
-
             const toast = document.createElement('div');
             toast.className = 'toast warning';
             toast.innerHTML = '<span class="toast-msg">' + msg + ' <b id="rebootCountdown">15</b> сек</span>';
             container.appendChild(toast);
-
             let countdown = 15;
             const interval = setInterval(() => {
                 countdown--;
@@ -803,7 +746,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             }, 1000);
         }
 
-        // --- Перезагрузка устройства с таймером ---
         async function rebootDevice() {
             try {
                 await fetch('/api/restart', { method: 'POST' });
@@ -811,7 +753,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             showRebootCountdown('⏳ Перезагрузка...');
         }
 
-        // --- Обновление прошивки файлом ---
         async function uploadFirmware() {
             const input = document.getElementById('firmwareFileInput');
             const file = input.files && input.files[0];
@@ -833,7 +774,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
                 const res = await fetch('/update', { method: 'POST', body: fd });
                 const bodyText = await res.text();
 
-                // ESP8266HTTPUpdateServer отвечает 200 даже при ошибке — инспектируем текст ответа
                 if (bodyText.toLowerCase().indexOf('error') !== -1) {
                     status.className = 'fw-status error';
                     status.textContent = '❌ Ошибка обновления: ' + bodyText;
@@ -841,13 +781,10 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
                     return;
                 }
 
-                // Успех: показан "Update Success! Rebooting..."
                 status.className = 'fw-status ok';
                 status.textContent = '✅ Прошивка установлена!';
                 showRebootCountdown('✅ Прошивка установлена! Перезагрузка...');
             } catch (e) {
-                // Соединение оборвано — ESP закрыл коннект и начал перезагрузку (успех)
-                // или сетевая ошибка при загрузке
                 if (e instanceof TypeError) {
                     status.className = 'fw-status ok';
                     status.textContent = '✅ Прошивка загружена, устройство перезагружается...';
@@ -879,18 +816,25 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
             const text = await file.text();
             try {
                 const config = JSON.parse(text);
+                
+                // Жёстко требуем все поля. Если нет — ошибка валидации.
                 const res = await fetch('/api/config', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        channels: config.channels || [],
-                        rules: config.rules || [],
-                        sensorNames: config.sensorNames || [],
-                        deviceName: config.deviceName || '',
-                        serverUrl: config.serverUrl || '',
-                        period: config.period || 0,
-                        ssid: config.ssid || '',
-                        pass: config.pass || ''
+                        channels: config.channels,
+                        rules: config.rules,
+                        sensorNames: config.sensorNames,
+                        deviceName: config.deviceName,
+                        serverUrl: config.serverUrl,
+                        period: config.period,
+                        ssid: config.ssid,
+                        pass: config.pass,
+                        mqttEnabled: config.mqttEnabled,
+                        mqttServer: config.mqttServer,
+                        mqttPort: config.mqttPort,
+                        mqttUser: config.mqttUser,
+                        mqttPass: config.mqttPass
                     })
                 });
                 if (res.ok) alert("Конфиг загружен! Перезагрузка...");
@@ -905,21 +849,17 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
                 const res = await fetch('/api/status');
                 const data = await res.json();
 
-                // Версия прошивки (вкладка «Прошивка»)
                 if (data.fw) document.getElementById('fwVersion').value = data.fw;
 
-                // Обновляем флаги active в таблице правил (без полной перерисовки)
                 if (data.rules) {
                     data.rules.forEach((r, i) => {
                         if (rules[i]) rules[i].active = r.active;
                     });
-                    // Точечно обновляем классы
                     document.querySelectorAll('.active-dot').forEach((dot, i) => {
                         dot.className = 'active-dot ' + (rules[i]?.active ? 'on' : '');
                     });
                 }
 
-                // Реле
                 let html = '';
                 data.relays.forEach(r => {
                     const label = pinNames[r.pin] || r.pin;
@@ -931,7 +871,6 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
                 });
                 document.getElementById('relayStatus').innerHTML = html || '<i>Нет реле</i>';
 
-                // Кнопки
                 html = '';
                 data.buttons.forEach(b => {
                     const label = pinNames[b.pin] || b.pin;
@@ -940,9 +879,7 @@ const char WEBUI_JS[] PROGMEM = R"rawliteral(
                 });
                 document.getElementById('buttonStatus').innerHTML = html || '<i>Нет кнопок</i>';
 
-                // Датчики
                 html = '';
-                // Сортируем по алфавиту (по имени; без имени — по ROM)
                 data.sensors.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, 'ru'));
                 data.sensors.forEach(s => {
                     const sname = s.name || '';

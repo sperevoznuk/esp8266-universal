@@ -12,7 +12,8 @@
 #include "sensors.h"
 #include "logic.h"
 #include "telemetry.h"
-#include "api.h" // <-- Наши обработчики
+#include "api.h"
+#include "mqtt.h" 
 
 // Глобальный экземпляр сервера (объявлен как extern в globals.h)
 ESP8266WebServer server(80);
@@ -28,6 +29,7 @@ void setup() {
     wifiSetup::begin(&server);
 
     sensors::begin();
+    mqtt::begin(); 
 
     // Регистрация маршрутов
     server.on("/", api::handleRoot);
@@ -62,6 +64,7 @@ void loop() {
     wifiSetup::tick();
     server.handleClient();
     sensors::tick();
+    mqtt::process();  
 
     static unsigned long lastEval = 0;
     if (millis() - lastEval > 1000) {

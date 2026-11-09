@@ -26,6 +26,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             <button onclick="switchTab(this, 'sensorsTab')">Имена датчиков</button>
             <button onclick="switchTab(this, 'wifi')">Wi-Fi</button>
             <button onclick="switchTab(this, 'telemetry')">Телеметрия</button>
+            <button onclick="switchTab(this, 'mqtt')">MQTT</button>
             <button onclick="switchTab(this, 'config')">Конфиг</button>
             <button onclick="switchTab(this, 'firmware')">Прошивка</button>
         </div>
@@ -228,6 +229,30 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 <div id="fwStatus" class="fw-status"></div>
             </div>
         </div>
+
+        <div id="tabMqtt" class="tab-content">
+            <div class="tab-desc">Настройка подключения к MQTT-брокеру (например, Mosquitto) и интеграции с Home Assistant через auto-discovery.</div>
+            <div class="form-box">
+                <h3>MQTT</h3>
+                <div class="row">
+                    <div class="col">
+                        <label style="display:flex;align-items:center;gap:6px;">
+                            <input type="checkbox" id="mqttEnabled" style="width:auto;margin:0;"> Включить MQTT
+                        </label>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col"><label>Адрес брокера</label><input type="text" id="mqttServer" placeholder="192.168.0.100"></div>
+                    <div class="col"><label>Порт</label><input type="number" id="mqttPort" placeholder="1883" value="1883"></div>
+                </div>
+                <div class="row">
+                    <div class="col"><label>Пользователь (опционально)</label><input type="text" id="mqttUser" placeholder="mqtt"></div>
+                    <div class="col"><label>Пароль</label><input type="password" id="mqttPass" placeholder="******"></div>
+                </div>
+                <button onclick="saveMqttSettings()" style="background:#17a2b8;width:100%;">💾 Сохранить MQTT</button>
+            </div>
+        </div>
+
 
     </div>
     <div class="toast-container" id="toastContainer"></div>

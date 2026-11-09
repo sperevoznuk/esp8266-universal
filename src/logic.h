@@ -3,6 +3,7 @@
 #include "channels.h"
 #include "sensors.h"
 #include "common.h"
+#include "mqtt.h"
 
 namespace logic {
 
@@ -96,6 +97,7 @@ namespace logic {
             if (hasRules) {
                 if (channels::setRelay(ch.pin, shouldBeOn)) {
                     anyChanged = true;
+                    mqtt::publishRelayState(ch.pin, shouldBeOn);
                 }
             }
         }
@@ -103,12 +105,14 @@ namespace logic {
     }
 
     // Основной цикл вычисления правил (DAG)
-    inline void evaluateRules() {
+   inline void evaluateRules() {
         // 0. Детектор перехода enabled→disabled: выключить актуаторы
-        for (auto& r : g_config.rules) {
+       for (auto& r : g_config.rules) {
             if (r.prevEnabled && !r.enabled) {
                 for (uint8_t pin : r.actuators) {
-                    channels::setRelay(pin, false);
+                    if (channels::setRelay(pin, false)) {
+                        mqtt::publishRelayState(pin, false);
+                    }
                 }
             }
             r.prevEnabled = r.enabled;
@@ -116,28 +120,29 @@ namespace logic {
 
         // 1. Сбрасываем active у выключенных правил
         for (auto& r : g_config.rules) {
-            if (!r.enabled) r.active = false;
+            if (!r.enabled) {
+                if (r.active) {
+                    r.active = false;
+                    mqtt::publishRuleState(r); // <-- Отправляем, что больше не сработало
+                }
+            }
         }
 
-        // 2. Итеративно разрешаем каскады:
-        //    оцениваем правила и применяем реле в каждом проходе,
-        //    чтобы следующие проходы видели обновлённые состояния реле.
+        // 2. Итеративно разрешаем каскады
         for (int depth = 0; depth < MAX_CASCADE_DEPTH; depth++) {
             bool changed = false;
 
-            // Оцениваем все правила
             for (auto& r : g_config.rules) {
                 if (!r.enabled) continue;
                 bool newActive = evaluateCondition(r);
                 if (newActive != r.active) {
                     r.active = newActive;
                     changed = true;
+                    mqtt::publishRuleState(r); // <-- ДОБАВИТЬ: отправка в MQTT при сработке
                 }
             }
 
-            // Применяем реле — следующий проход увидит новые состояния
             applyRelayStates();
-
             if (!changed) break;
         }
     }
